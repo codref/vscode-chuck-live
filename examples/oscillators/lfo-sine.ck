@@ -1,0 +1,45 @@
+// oscillators/lfo-sine.ck — slow sine for pads / drones (wide range, gentle defaults).
+
+// @knob min=0 max=0.6 step=0.01 default=0.22
+global float lfo_amp;
+
+// @slider min=0.05 max=20 step=0.01 default=0.25
+global float lfo_rate;
+
+// @slider min=40 max=600 step=1 default=82
+global float lfo_center;
+
+// @knob min=0 max=40 step=0.1 default=8
+global float lfo_depth;
+
+// @knob min=0 max=1 step=0.01 default=0.4
+global float lfo_space;
+
+0.22 => lfo_amp;
+0.25 => lfo_rate;
+82.0 => lfo_center;
+8.0 => lfo_depth;
+0.4 => lfo_space;
+
+SinOsc a => Gain g => NRev rev => dac;
+SinOsc b => g;
+0.0 => a.gain;
+0.0 => b.gain;
+0.15 => rev.mix;
+
+spork ~ follow();
+while (true) 20::ms => now;
+
+fun void follow() {
+  while (true) {
+    lfo_amp * 0.55 => a.gain;
+    lfo_amp * 0.45 * lfo_space => b.gain;
+    0.08 + lfo_space * 0.25 => rev.mix;
+
+    now / second => float t;
+    lfo_center + Math.sin(2.0 * Math.PI * lfo_rate * t) * lfo_depth => a.freq;
+    // slight stereo-ish detune via second osc
+    a.freq() * 1.005 => b.freq;
+    5::ms => now;
+  }
+}

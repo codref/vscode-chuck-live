@@ -1,0 +1,198 @@
+:root {
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  --knob-face: color-mix(in srgb, var(--vscode-sideBar-background) 70%, #888 30%);
+  --knob-ring: var(--vscode-focusBorder, #6a9);
+  --knob-tick: var(--vscode-foreground);
+}
+
+body {
+  margin: 0;
+  padding: 8px 10px 16px;
+}
+
+.toolbar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.scope-btn {
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 11px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  cursor: pointer;
+}
+
+.scope-btn.active {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+
+.scope-btn:hover:not(.active) {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.group-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  opacity: 0.85;
+  margin: 10px 0 6px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 18%, transparent);
+}
+
+.group-title:first-child {
+  margin-top: 0;
+}
+
+.hint {
+  opacity: 0.75;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.hint code {
+  font-family: var(--vscode-editor-font-family);
+}
+
+.grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 12px;
+  justify-content: flex-start;
+}
+
+.cell {
+  width: 88px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.cell-name {
+  font-size: 11px;
+  opacity: 0.9;
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-value {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+/* Rotary dial */
+.dial {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+  background:
+    radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.18), transparent 45%),
+    var(--knob-face);
+  box-shadow:
+    inset 0 1px 2px rgba(255, 255, 255, 0.12),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.35),
+    0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.dial::before {
+  /* arc track */
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--vscode-foreground) 18%, transparent);
+  pointer-events: none;
+}
+
+.dial-pointer {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2px;
+  height: 22px;
+  margin-left: -1px;
+  margin-top: -22px;
+  transform-origin: bottom center;
+  background: var(--knob-tick);
+  border-radius: 1px;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--knob-ring) 40%, transparent);
+}
+
+.dial.active {
+  outline: 1px solid var(--knob-ring);
+  outline-offset: 2px;
+}
+
+.dial:focus-visible {
+  outline: 1px solid var(--knob-ring);
+  outline-offset: 2px;
+}
+
+button.bang {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 1px solid var(--vscode-button-border, transparent);
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+button.bang:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+button.bang:active {
+  transform: scale(0.96);
+}
+
+.cell-bang .cell-value {
+  visibility: hidden;
+}
+
+/* Horizontal slider control (ui=slider / @slider) */
+.cell-slider {
+  width: 100%;
+  max-width: 220px;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.slider-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.cell-slider input[type="range"] {
+  width: 100%;
+  accent-color: var(--vscode-focusBorder);
+  cursor: pointer;
+}
+
+.empty {
+  opacity: 0.7;
+  font-size: 12px;
+}

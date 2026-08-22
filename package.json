@@ -1,0 +1,215 @@
+{
+  "name": "chuck-live",
+  "displayName": "ChucK Live",
+  "description": "Live coding for ChucK: VM control, shred load/unload, and annotated knobs over OSC",
+  "version": "0.1.0",
+  "publisher": "chuck-live",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:chuck",
+    "onView:chuckLive.shreds",
+    "onView:chuckLive.knobs"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "chuck",
+        "aliases": [
+          "ChucK",
+          "chuck"
+        ],
+        "extensions": [
+          ".ck"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "chuck",
+        "scopeName": "source.chuck",
+        "path": "./syntaxes/chuck.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "chuckLive.startVm",
+        "title": "ChucK: Start VM",
+        "icon": "$(play)"
+      },
+      {
+        "command": "chuckLive.stopVm",
+        "title": "ChucK: Stop VM",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "chuckLive.addShred",
+        "title": "ChucK: Add Current File",
+        "icon": "$(add)"
+      },
+      {
+        "command": "chuckLive.replaceShred",
+        "title": "ChucK: Replace / Live Update",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "chuckLive.removeShred",
+        "title": "ChucK: Remove Shred",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "chuckLive.removeAll",
+        "title": "ChucK: Remove All Shreds"
+      },
+      {
+        "command": "chuckLive.refreshStatus",
+        "title": "ChucK: Refresh Status",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "chuckLive.refreshKnobs",
+        "title": "ChucK: Refresh Knobs",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "chuckLive.toggleKnobsScope",
+        "title": "ChucK: Toggle Knobs Scope (Current / All)",
+        "icon": "$(list-tree)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "chuckLive.replaceShred",
+        "key": "ctrl+.",
+        "mac": "cmd+.",
+        "when": "editorLangId == chuck"
+      },
+      {
+        "command": "chuckLive.addShred",
+        "key": "ctrl+shift+.",
+        "mac": "cmd+shift+.",
+        "when": "editorLangId == chuck"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "chuckLive",
+          "title": "ChucK Live",
+          "icon": "media/chuck-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "chuckLive": [
+        {
+          "id": "chuckLive.shreds",
+          "name": "Shreds"
+        },
+        {
+          "type": "webview",
+          "id": "chuckLive.knobs",
+          "name": "Knobs"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "chuckLive.startVm",
+          "when": "view == chuckLive.shreds",
+          "group": "navigation@1"
+        },
+        {
+          "command": "chuckLive.stopVm",
+          "when": "view == chuckLive.shreds",
+          "group": "navigation@2"
+        },
+        {
+          "command": "chuckLive.refreshStatus",
+          "when": "view == chuckLive.shreds",
+          "group": "navigation@3"
+        },
+        {
+          "command": "chuckLive.refreshKnobs",
+          "when": "view == chuckLive.knobs",
+          "group": "navigation@1"
+        },
+        {
+          "command": "chuckLive.toggleKnobsScope",
+          "when": "view == chuckLive.knobs",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "chuckLive.removeShred",
+          "when": "view == chuckLive.shreds",
+          "group": "inline"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "chuckLive.addShred",
+          "when": "editorLangId == chuck",
+          "group": "chuckLive@1"
+        },
+        {
+          "command": "chuckLive.replaceShred",
+          "when": "editorLangId == chuck",
+          "group": "chuckLive@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "ChucK Live",
+      "properties": {
+        "chuckLive.executable": {
+          "type": "string",
+          "default": "chuck",
+          "description": "ChucK binary. Default \"chuck\" auto-uses bin/chuck-pw (pw-jack) when present; set an absolute path to override."
+        },
+        "chuckLive.otfPort": {
+          "type": "number",
+          "default": 8888,
+          "description": "OTF TCP port for the listener VM"
+        },
+        "chuckLive.oscPort": {
+          "type": "number",
+          "default": 9000,
+          "description": "UDP port for knob OSC messages (bridge.ck listens here)"
+        },
+        "chuckLive.vmArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Extra arguments passed when starting chuck --loop"
+        },
+        "chuckLive.saveBeforeAdd": {
+          "type": "boolean",
+          "default": true,
+          "description": "Save the active editor before add/replace"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "node ./node_modules/typescript/lib/tsc.js -p ./",
+    "watch": "node ./node_modules/typescript/lib/tsc.js -watch -p ./",
+    "package": "node ./node_modules/typescript/lib/tsc.js -p ./ && node scripts/package-vsix.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.3"
+  }
+}

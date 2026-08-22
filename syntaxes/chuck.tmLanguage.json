@@ -1,0 +1,173 @@
+{
+  "scopeName": "source.chuck",
+  "name": "ChucK",
+  "fileTypes": ["ck"],
+  "patterns": [
+    {
+      "captures": {
+        "0": {
+          "name": "punctuation.definition.comment.chuck"
+        }
+      },
+      "match": "/\\*\\*/",
+      "name": "comment.block.empty.chuck"
+    },
+    {
+      "begin": "/\\*",
+      "captures": {
+        "0": {
+          "name": "punctuation.definition.comment.chuck"
+        }
+      },
+      "end": "\\*/",
+      "name": "comment.block.chuck"
+    },
+    {
+      "begin": "(^[ \\t]+)?(?=//|<\\-\\-)",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.whitespace.comment.leading.chuck"
+        }
+      },
+      "end": "(?!\\G)",
+      "patterns": [
+        {
+          "begin": "//|<\\-\\-",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.chuck"
+            }
+          },
+          "end": "\\n",
+          "name": "comment.line.double-slash.chuck"
+        }
+      ]
+    },
+    {
+      "begin": "\"",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.begin.chuck"
+        }
+      },
+      "end": "\"",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.chuck"
+        }
+      },
+      "name": "string.quoted.double.chuck",
+      "patterns": [
+        {
+          "name": "constant.character.escape.chuck",
+          "match": "\\\\."
+        }
+      ]
+    },
+    {
+      "begin": "'",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.begin.chuck"
+        }
+      },
+      "end": "'",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.chuck"
+        }
+      },
+      "name": "string.quoted.single.chuck",
+      "patterns": [
+        {
+          "name": "constant.character.escape.chuck",
+          "match": "\\\\."
+        },
+        {
+          "name": "constant.character.chuck",
+          "match": "[^'\\\\]"
+        }
+      ]
+    },
+    {
+      "match": "<<<|>>>",
+      "name": "support.function.debug.chuck"
+    },
+    {
+      "match": "\\b(complex|dur|float|int|polar|same|string|time|void)\\b",
+      "name": "storage.type.chuck"
+    },
+    {
+      "match": "\\b(break|continue|do|else|for|if|repeat|return|switch|until|while)\\b",
+      "name": "keyword.control.chuck"
+    },
+    {
+      "match": "\\b(class|interface)\\b",
+      "name": "storage.type.class.chuck"
+    },
+    {
+      "match": "\\b(extends|implements|private|protected|public|pure|static)\\b",
+      "name": "storage.modifier.class.chuck"
+    },
+    {
+      "match": "\\b(this|super)\\b",
+      "name": "variable.language.chuck"
+    },
+    {
+      "match": "\\b(const|fun|function|new|spork)\\b",
+      "name": "keyword.control.chuck"
+    },
+    {
+      "match": "\\b(adc|blackhole|cherr|chout|dac|day|false|hour|maybe|me|minute|ms|now|null|NULL|samp|second|true|week)\\b",
+      "name": "constant.special.chuck"
+    },
+    {
+      "match": "\\b(0[xX]\\h(?>_?\\h)*|\\d(?>_?\\d)*(\\.(?![^[:space:][:digit:]])(?>_?\\d)*)?([eE][-+]?\\d(?>_?\\d)*)?|0[bB][01]+|pi)\\b",
+      "name": "constant.numeric.chuck"
+    },
+    {
+      "match": "=>|=<|@=>|\\+=>|\\-=>|\\*=>|\\/=>|%=>|\\+\\+|\\+|\\-\\-|\\-|\\*|\\/(?!\\/)|%|==|!=|<=|>=|<<|>>|<|>|&&|\\|\\||&|\\||\\^|\\$|::",
+      "name": "keyword.operator.chuck"
+    },
+    {
+      "match": "\\b(ADSR|BandedWG|BeeThree|BiQuad|Blit|BlitSaw|BlitSquare|BlowBotl|BlowHole|BLT|Bowed|BPF|Brass|BRF|Chorus|Chugen|Chugraph|Clarinet|CNoise|CurveTable|Delay|DelayA|DelayL|Dyno|Echo|Envelope|Filter|FilterBasic|FilterStk|Flute|FM|FMVoices|FullRect|Gain|Gen10|Gen17|Gen5|Gen7|Gen9|GenX|HalfRect|HevyMetl|HPF|Impulse|JCRev|LiSa|LiSa10|LPF|Mandolin|Mix2|ModalBar|Modulate|Moog|Noise|NRev|OnePole|OneZero|Pan2|PercFlut|Phasor|PitShift|PoleZero|PRCRev|PulseOsc|ResonZ|Rhodey|SawOsc|Saxofony|Shakers|SinOsc|Sitar|SndBuf2?|SqrOsc|Step|StifKarp|StkInstrument|SubNoise|TriOsc|TubeBell|TwoPole|TwoZero|UGen|UGen_Multi|UGen_Stereo|VoicForm|WarpTable|WaveLoop|Wurley|WvIn|WvOut)\\b",
+      "name": "support.class.ugen.chuck"
+    },
+    {
+      "match": "\\b(AutoCorr|Centroid|DCT|FeatureCollector|FFT|Flip|Flux|IDCT|IFFT|pilF|RMS|RollOff|UAna|UAnaBlob|Windowing|XCorr|ZeroX)\\b",
+      "name": "support.class.uana.chuck"
+    },
+    {
+      "match": "\\b(Machine|Math|Object|RegEx|Shred|Std)\\b",
+      "name": "support.class.library.chuck"
+    },
+    {
+      "match": "\\b(Event|Hid|HidMsg|MidiIn|MidiMsg|MidiOut|OscEvent|OscIn|OscMsg|OscOut|OscRecv)\\b",
+      "name": "support.class.event.chuck"
+    },
+    {
+      "match": "\\b(FileIO|IO|KBHit|MidiFileIn|SerialIO|StdErr|StdOut)\\b",
+      "name": "support.class.io.chuck"
+    },
+    {
+      "match": "\\b(ABSaturator|AmbPan3|Binaural|Bitcrusher|Elliptic|ExpDelay|ExpEnv|Faust|FIR|FluidSynth|FoldbackSaturator|GVerb|KasFilter|LADSPA|MagicSine|Mesh2D|MIAP|Multicomb|NHHall|Overdrive|Pan16|Pan4|Pan8|Patch|Perlin|PitchTrack|PowerADSR|Random|Range|Sigmund|Spectacle|WarpBuf|Wavetable|WinFuncEnv|WPDiodeLadder|WPKorg35)\\b",
+      "name": "support.class.chugin.chuck"
+    },
+    {
+      "match": "(\\.)\\s*([a-zA-Z_$][\\w$]*)",
+      "captures": {
+        "2": {
+          "name": "entity.name.function.chuck"
+        }
+      }
+    },
+    {
+      "match": "([A-Za-z_$][\\w$]*)\\s*(\\()",
+      "captures": {
+        "1": {
+          "name": "entity.name.function.chuck"
+        }
+      }
+    }
+  ]
+}

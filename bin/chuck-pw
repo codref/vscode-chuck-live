@@ -1,0 +1,3 @@
+#!/bin/sh
+# PipeWire JACK bridge — required on systems where chuck is built for JACK only.
+exec pw-jack chuck "$@"
