@@ -3,13 +3,16 @@ import * as path from 'path';
 import * as fs from 'fs';
 import {
   Annotation,
+  SeqTarget,
   mergeAnnotations,
   parseAnnotations,
+  seqTargetsFromAnnotations,
 } from './annotations';
 import { getConfig } from './config';
 import { OscClient } from './oscClient';
 import { writeBridgeFile } from './bridgeGen';
-import { ShredOps } from './shredOps';
+import { ShredOps, isFileModule } from './shredOps';
+import { resolveChuckPath } from './chuckPaths';
 
 /** How the knobs panel lists controls. */
 export type KnobsScope = 'current' | 'all';
@@ -38,7 +41,10 @@ export class KnobsPanelProvider implements vscode.WebviewViewProvider {
     private readonly extensionUri: vscode.Uri,
     private readonly osc: OscClient,
     private readonly shredOps: ShredOps,
-    private readonly onBridgeNeeded: (bridgePath: string) => Promise<void>
+    private readonly onBridgeNeeded: (
+      bridgePath: string,
+      source?: string
+    ) => Promise<boolean | void>
   ) {}
 
   resolveWebviewView(
@@ -83,9 +89,9 @@ export class KnobsPanelProvider implements vscode.WebviewViewProvider {
 
     if (reloadBridge) {
       const { oscPort } = getConfig();
-      const bridgePath = writeBridgeFile(this.allForBridge, oscPort);
+      const bridge = writeBridgeFile(this.allForBridge, oscPort);
       try {
-        await this.onBridgeNeeded(bridgePath);
+        await this.onBridgeNeeded(bridge.path, bridge.source);
       } catch (err) {
         console.warn('bridge reload skipped:', err);
       }
@@ -168,11 +174,11 @@ export function collectAnnotationSources(
   }
 
   for (const shred of shredOps.list()) {
-    if (shred.isBridge) {
+    if (shred.isBridge || !isFileModule(shred.source, shred.isBridge)) {
       continue;
     }
-    const abs = path.resolve(shred.source);
-    if (seen.has(abs)) {
+    const abs = resolveChuckPath(shred.source);
+    if (!path.isAbsolute(abs) || seen.has(abs)) {
       continue;
     }
     try {
@@ -195,6 +201,11 @@ export function collectAnnotations(shredOps: ShredOps): Annotation[] {
   return mergeAnnotations(
     collectAnnotationSources(shredOps).map((s) => s.annotations)
   );
+}
+
+/** Sequenceable float targets (+ preferred @seq) from loaded shreds. */
+export function collectSeqTargets(shredOps: ShredOps): SeqTarget[] {
+  return seqTargetsFromAnnotations(collectAnnotations(shredOps));
 }
 
 function groupsForScope(

@@ -1,4 +1,6 @@
-// oscillators/square.ck — pulse oscillator; width sweeps from thin needle to square.
+// oscillators/square.ck — pulse into rackBus (load master.ck first).
+
+global Gain rackBus;
 
 // @knob min=0 max=0.5 step=0.01 default=0.12
 global float sqr_amp;
@@ -21,7 +23,7 @@ global float sqr_pwmHz;
 2500.0 => sqr_cutoff;
 0.0 => sqr_pwmHz;
 
-PulseOsc osc => LPF lpf => dac;
+PulseOsc osc => LPF lpf => rackBus;
 0.0 => osc.gain;
 0.25 => osc.width;
 

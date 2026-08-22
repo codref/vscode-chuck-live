@@ -1,10 +1,12 @@
-// oscillators/sine.ck — pure sine; mix with other oscillator examples on one VM.
-// Add this shred alongside saw/square/etc., then use Knobs → All (grouped).
+// oscillators/sine.ck — pure sine into rackBus (load master.ck first).
+
+global Gain rackBus;
 
 // @knob min=0 max=0.8 step=0.01 default=0.2
 global float sine_amp;
 
 // @slider min=40 max=1600 step=1 default=220
+// @seq mode=raw
 global float sine_freq;
 
 // @knob min=-12 max=12 step=0.01 default=0
@@ -26,7 +28,9 @@ global float sine_pan;
 0.0 => sine_vibDepth;
 0.0 => sine_pan;
 
-SinOsc osc => Pan2 pan => dac;
+SinOsc osc => Pan2 pan;
+pan.chan(0) => rackBus;
+pan.chan(1) => rackBus;
 0.0 => osc.gain;
 
 spork ~ follow();

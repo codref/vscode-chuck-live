@@ -6,16 +6,15 @@ import { Annotation } from './annotations';
 /**
  * Build a temporary bridge.ck that declares the same globals as annotated
  * user code and maps OSC /chuck/<name> → those globals.
- *
- * ChucK `global` vars are shared across shreds in one VM.
  */
 export function writeBridgeFile(
   annotations: Annotation[],
   oscPort: number
-): string {
+): { path: string; source: string } {
+  const source = generateBridgeSource(annotations, oscPort);
   const outPath = path.join(os.tmpdir(), 'chuck-live-bridge.ck');
-  fs.writeFileSync(outPath, generateBridgeSource(annotations, oscPort), 'utf8');
-  return outPath;
+  fs.writeFileSync(outPath, source, 'utf8');
+  return { path: outPath, source };
 }
 
 export function generateBridgeSource(
@@ -80,4 +79,17 @@ export function generateBridgeSource(
 
   lines.push('  }', '}', '');
   return lines.join('\n');
+}
+
+/** Merge by name; later list wins. */
+export function mergeAnnotationLists(
+  ...lists: Annotation[][]
+): Annotation[] {
+  const map = new Map<string, Annotation>();
+  for (const list of lists) {
+    for (const a of list) {
+      map.set(a.name, a);
+    }
+  }
+  return [...map.values()];
 }

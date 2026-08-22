@@ -7,6 +7,8 @@ import { ShredOps, ShredTreeProvider, ShredInfo } from './shredOps';
 import { StatusBar } from './statusBar';
 import { KnobsPanelProvider, collectAnnotations } from './knobsPanel';
 import { writeBridgeFile } from './bridgeGen';
+import { RackPanel } from './rackPanel';
+import { SeqPanel } from './seqPanel';
 
 export function activate(context: vscode.ExtensionContext): void {
   setExtensionPath(context.extensionPath);
@@ -16,27 +18,58 @@ export function activate(context: vscode.ExtensionContext): void {
   const statusBar = new StatusBar(vm);
   const tree = new ShredTreeProvider(shredOps);
 
+  const loadBridge = async (
+    bridgePath: string,
+    source?: string
+  ): Promise<boolean> => {
+    if (!vm.running) {
+      return false;
+    }
+    return shredOps.loadBridge(bridgePath, source);
+  };
+
   const knobs = new KnobsPanelProvider(
     context.extensionUri,
     osc,
     shredOps,
-    async (bridgePath) => {
-      if (vm.running) {
-        await shredOps.loadBridge(bridgePath);
-      }
-    }
+    loadBridge
+  );
+
+  const rack = new RackPanel(
+    context.extensionUri,
+    osc,
+    shredOps,
+    loadBridge
+  );
+
+  const seq = new SeqPanel(
+    context.extensionUri,
+    osc,
+    shredOps,
+    loadBridge
   );
 
   context.subscriptions.push(
     vm,
     osc,
     statusBar,
+    { dispose: () => rack.dispose() },
+    { dispose: () => seq.dispose() },
     vscode.window.registerTreeDataProvider('chuckLive.shreds', tree),
     vscode.window.registerWebviewViewProvider(KnobsPanelProvider.viewType, knobs),
     vm.onStatusChange((on) => {
       if (!on) {
         shredOps.clearLocal();
       }
+      if (rack.isOpen) {
+        void rack.refresh(false);
+      }
+    }),
+    shredOps.onDidChange(() => {
+      if (rack.isOpen) {
+        void rack.refresh(false);
+      }
+      // Do NOT call seq.ensureBridge here — loadBridge fires onDidChange and loops.
     })
   );
 
@@ -55,13 +88,16 @@ export function activate(context: vscode.ExtensionContext): void {
       // Load OSC bridge from current annotations (may be empty at first).
       const anns = collectAnnotations(shredOps);
       const { oscPort } = getConfig();
-      const bridgePath = writeBridgeFile(anns, oscPort);
+      const bridge = writeBridgeFile(anns, oscPort);
       try {
-        await shredOps.loadBridge(bridgePath);
+        await shredOps.loadBridge(bridge.path, bridge.source);
       } catch (err) {
         vscode.window.showWarningMessage(`Bridge load: ${err}`);
       }
       await knobs.refresh(false);
+      if (rack.isOpen) {
+        void rack.refresh(false);
+      }
       vscode.window.showInformationMessage('ChucK VM started');
     }),
 
@@ -78,6 +114,12 @@ export function activate(context: vscode.ExtensionContext): void {
       try {
         await shredOps.add(file);
         await knobs.refresh(true);
+        if (rack.isOpen) {
+          void rack.refresh(false);
+        }
+        if (seq.isOpen) {
+          void seq.ensureBridge().then(() => seq.pushTargets());
+        }
         vscode.window.showInformationMessage(`Added ${path.basename(file)}`);
       } catch (err) {
         vscode.window.showErrorMessage(String(err));
@@ -103,6 +145,12 @@ export function activate(context: vscode.ExtensionContext): void {
           );
         }
         await knobs.refresh(true);
+        if (rack.isOpen) {
+          void rack.refresh(false);
+        }
+        if (seq.isOpen) {
+          void seq.ensureBridge().then(() => seq.pushTargets());
+        }
       } catch (err) {
         vscode.window.showErrorMessage(String(err));
       }
@@ -125,6 +173,9 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       try {
         await shredOps.remove(id);
+        if (rack.isOpen) {
+          void rack.refresh(false);
+        }
       } catch (err) {
         vscode.window.showErrorMessage(String(err));
       }
@@ -133,8 +184,13 @@ export function activate(context: vscode.ExtensionContext): void {
     cmd('chuckLive.removeAll', async () => {
       try {
         await shredOps.removeAll();
-        // Keep OSC bridge alive after wipe
         await knobs.refresh(true);
+        if (rack.isOpen) {
+          void rack.refresh(false);
+        }
+        if (seq.isOpen) {
+          void seq.ensureBridge().then(() => seq.pushTargets());
+        }
       } catch (err) {
         vscode.window.showErrorMessage(String(err));
       }
@@ -155,14 +211,26 @@ export function activate(context: vscode.ExtensionContext): void {
 
     cmd('chuckLive.toggleKnobsScope', () => {
       knobs.toggleScope();
+    }),
+
+    cmd('chuckLive.openRack', () => {
+      rack.open();
+    }),
+
+    cmd('chuckLive.openSequencer', () => {
+      seq.open();
     })
   );
 
-  // Keep knobs in sync when editing annotations / switching files
+  // Keep knobs / rack in sync when editing annotations / switching files
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument((doc) => {
       if (doc.languageId === 'chuck' || doc.fileName.endsWith('.ck')) {
-        void knobs.refresh(true);
+        // UI only — avoid bridge reload spam while sequencer runs
+        void knobs.refresh(false);
+        if (rack.isOpen) {
+          void rack.refresh(false);
+        }
       }
     }),
     vscode.window.onDidChangeActiveTextEditor((ed) => {

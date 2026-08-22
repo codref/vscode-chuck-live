@@ -1,4 +1,6 @@
-// oscillators/saw.ck — bright saw into a resonant low-pass (bass / lead body).
+// oscillators/saw.ck — bright saw into rackBus (load master.ck first).
+
+global Gain rackBus;
 
 // @knob min=0 max=0.6 step=0.01 default=0.15
 global float saw_amp;
@@ -21,7 +23,7 @@ global float saw_drive;
 2.0 => saw_Q;
 0.0 => saw_drive;
 
-SawOsc osc => LPF lpf => Gain drive => dac;
+SawOsc osc => LPF lpf => Gain drive => rackBus;
 0.0 => osc.gain;
 1.0 => drive.gain;
 
@@ -34,7 +36,6 @@ fun void follow() {
     saw_freq => osc.freq;
     saw_cutoff => lpf.freq;
     saw_Q => lpf.Q;
-    // soft overdrive: raise gain then the LPF/dac clip mildly
     1.0 + saw_drive * 4.0 => drive.gain;
     5::ms => now;
   }

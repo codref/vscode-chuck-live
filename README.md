@@ -25,27 +25,16 @@ cursor --install-extension chuck-live-0.1.0.vsix
 
 ## Quick start
 
-1. Open `examples/demo.ck`, `examples/cyberpunk.ck`, or an oscillator under `examples/oscillators/`.
-2. Command Palette → **ChucK: Start VM** (or the ChucK Live activity bar).
-3. **ChucK: Add Current File** (`Ctrl+Shift+.` / `Cmd+Shift+.`).
-4. Open the **Knobs** view; use **All (grouped)** when several shreds are loaded.
-5. Edit and **ChucK: Replace / Live Update** (`Ctrl+.` / `Cmd+.`) to hot-swap.
+1. See **[examples/README.md](examples/README.md)** for demos, mix bus, and the Eurorack rack.
+2. Open a patch → **ChucK: Start VM** → **Add Current File**.
+3. **Knobs** sidebar and/or **ChucK: Open Rack** for controls.
+4. **Replace / Live Update** (`Ctrl+.`) to hot-swap the active file.
 
 ### Mixable oscillators (`examples/oscillators/`)
 
-Each file is a separate shred with **unique** knob names so they can run together and mix at the DAC:
+Load **`master.ck` first**, then any oscillators. They share `global Gain rackBus`; master applies cutoff / HP / amp to the sum. Details and knob tables: [examples/README.md](examples/README.md).
 
-| File | Role | Main knobs |
-|------|------|------------|
-| `sine.ck` | clean tone | amp, freq, detune, vib, pan |
-| `saw.ck` | bass / lead body | amp, freq, cutoff, Q, drive |
-| `square.ck` | pulse / PWM | amp, freq, width, cutoff, pwmHz |
-| `triangle.ck` | soft stack | amp, freq, sub, fifth, chorus |
-| `fm.ck` | 2-op FM | amp, car, ratio, index, fb |
-| `noise.ck` | air / grit | amp, cutoff, Q, hp, gateHz |
-| `lfo-sine.ck` | slow pad drone | amp, rate, center, depth, space |
-
-Workflow: Start VM → Add `sine.ck` → Add `saw.ck` → … → Knobs **All (grouped)** → blend amps.
+Standalone: `demo.ck`, `cyberpunk.ck` (direct `dac`, no bus).
 
 ## Annotations
 
@@ -112,4 +101,6 @@ bin/chuck-pw --probe
 
 - Start / Stop VM
 - Add Current File / Replace (live update) / Remove Shred / Remove All
-- Refresh Status / Refresh Knobs
+- Refresh Status / Refresh Knobs / Toggle Knobs Scope
+- **Open Rack** — full-page Eurorack modules for loaded shreds
+- **Open Sequencer** — 16-step grid bound to any `@knob`/`@seq` float (e.g. `sine_freq`, `mb_noteHz`)

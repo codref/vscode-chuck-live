@@ -82,6 +82,16 @@
         "command": "chuckLive.toggleKnobsScope",
         "title": "ChucK: Toggle Knobs Scope (Current / All)",
         "icon": "$(list-tree)"
+      },
+      {
+        "command": "chuckLive.openRack",
+        "title": "ChucK: Open Rack",
+        "icon": "$(circuit-board)"
+      },
+      {
+        "command": "chuckLive.openSequencer",
+        "title": "ChucK: Open Sequencer",
+        "icon": "$(grabber)"
       }
     ],
     "keybindings": [
@@ -136,6 +146,16 @@
           "command": "chuckLive.refreshStatus",
           "when": "view == chuckLive.shreds",
           "group": "navigation@3"
+        },
+        {
+          "command": "chuckLive.openRack",
+          "when": "view == chuckLive.shreds",
+          "group": "navigation@4"
+        },
+        {
+          "command": "chuckLive.openSequencer",
+          "when": "view == chuckLive.shreds",
+          "group": "navigation@5"
         },
         {
           "command": "chuckLive.refreshKnobs",

@@ -1,13 +1,30 @@
 import * as path from 'path';
+import * as fs from 'fs';
 import * as vscode from 'vscode';
 import { getConfig } from './config';
 import { ChuckVm, runChuck } from './chuckVm';
+import { resolveChuckPath } from './chuckPaths';
 
 export interface ShredInfo {
   id: number;
   source: string;
   /** True for the OSC bridge shred we manage. */
   isBridge?: boolean;
+}
+
+/**
+ * Top-level .ck shreds only — not OSC bridge, not `spork ~ follow()` children
+ * that show up in VM status as source `spork~follow`.
+ */
+export function isFileModule(source: string, isBridge?: boolean): boolean {
+  if (isBridge) {
+    return false;
+  }
+  const base = path.basename(source);
+  if (/^spork~/i.test(base) || /^spork~/i.test(source)) {
+    return false;
+  }
+  return /\.ck$/i.test(base);
 }
 
 /**
@@ -20,6 +37,8 @@ export class ShredOps {
   private shreds = new Map<number, ShredInfo>();
   private nextGuessId = 1;
   private bridgeId: number | undefined;
+  /** Last loaded bridge source — skip OTF replace if unchanged. */
+  private lastBridgeSource = '';
 
   private readonly _onDidChange = new vscode.EventEmitter<void>();
   readonly onDidChange = this._onDidChange.event;
@@ -76,6 +95,7 @@ export class ShredOps {
     this.shreds.clear();
     this.bridgeId = undefined;
     this.nextGuessId = 1;
+    this.lastBridgeSource = '';
     this._onDidChange.fire();
   }
 
@@ -86,10 +106,28 @@ export class ShredOps {
     await runChuck(executable, [`--port:${otfPort}`, '^']);
   }
 
-  /** Add or replace the OSC bridge shred from a generated .ck path. */
-  async loadBridge(bridgePath: string): Promise<void> {
+  /**
+   * Add or replace the OSC bridge shred.
+   * Pass `source` to skip reload when content is unchanged.
+   * Returns false if skipped (no OTF).
+   */
+  async loadBridge(bridgePath: string, source?: string): Promise<boolean> {
     this.ensureVm();
     const abs = path.resolve(bridgePath);
+    const src =
+      source ??
+      (() => {
+        try {
+          return fs.readFileSync(abs, 'utf8');
+        } catch {
+          return '';
+        }
+      })();
+
+    if (src && src === this.lastBridgeSource && this.bridgeId !== undefined) {
+      return false;
+    }
+
     const { executable, otfPort } = getConfig();
     if (this.bridgeId !== undefined) {
       await runChuck(executable, [
@@ -98,14 +136,16 @@ export class ShredOps {
         String(this.bridgeId),
         abs,
       ]);
-      this.remember(this.bridgeId, abs, true);
+      this.remember(this.bridgeId, abs, true, true);
     } else {
       await runChuck(executable, [`--port:${otfPort}`, '+', abs]);
       const id = this.nextGuessId++;
       this.bridgeId = id;
-      this.remember(id, abs, true);
+      this.remember(id, abs, true, true);
       await this.status();
     }
+    this.lastBridgeSource = src;
+    return true;
   }
 
   clearLocal(): void {
@@ -113,10 +153,16 @@ export class ShredOps {
     this.shreds.clear();
     this.bridgeId = undefined;
     this.nextGuessId = 1;
+    this.lastBridgeSource = '';
     this._onDidChange.fire();
   }
 
-  private remember(id: number, source: string, isBridge = false): void {
+  private remember(
+    id: number,
+    source: string,
+    isBridge = false,
+    silent = false
+  ): void {
     const abs = path.resolve(source);
     // Drop stale path→id if id moved
     for (const [p, sid] of this.byPath) {
@@ -132,7 +178,9 @@ export class ShredOps {
     if (isBridge) {
       this.bridgeId = id;
     }
-    this._onDidChange.fire();
+    if (!silent) {
+      this._onDidChange.fire();
+    }
   }
 
   private forget(id: number): void {
@@ -155,25 +203,12 @@ export class ShredOps {
     }
     const id = Number(m[1]);
     const source = m[2];
-    // Listener often prints basename only — keep a known absolute path for this id.
     const existing = this.shreds.get(id);
-    let abs = source;
-    if (path.isAbsolute(source)) {
-      abs = source;
-    } else if (existing && path.basename(existing.source) === source) {
-      abs = existing.source;
-    } else {
-      // Match by basename against files we already track
-      for (const [p] of this.byPath) {
-        if (path.basename(p) === source) {
-          abs = p;
-          break;
-        }
-      }
-    }
+    const abs = resolveChuckPath(source, existing?.source);
     const isBridge =
       abs.includes('chuck-live-bridge') ||
       abs.endsWith('bridge.ck') ||
+      /bridge\.ck$/i.test(source) ||
       this.bridgeId === id;
     this.remember(id, abs, isBridge);
   }
@@ -213,6 +248,9 @@ export class ShredTreeProvider implements vscode.TreeDataProvider<ShredInfo> {
   }
 
   getChildren(): ShredInfo[] {
-    return this.ops.list();
+    // Hide spork~ children; keep bridge visible for debugging
+    return this.ops.list().filter(
+      (s) => s.isBridge || isFileModule(s.source, false)
+    );
   }
 }

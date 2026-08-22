@@ -1,4 +1,6 @@
-// oscillators/triangle.ck — soft triangle with optional octave / sub blend.
+// oscillators/triangle.ck — soft triangle into rackBus (load master.ck first).
+
+global Gain rackBus;
 
 // @knob min=0 max=0.7 step=0.01 default=0.18
 global float tri_amp;
@@ -21,7 +23,7 @@ global float tri_chorus;
 0.0 => tri_fifth;
 0.0 => tri_chorus;
 
-TriOsc osc => Gain g => dac;
+TriOsc osc => Gain g => rackBus;
 TriOsc sub => g;
 TriOsc fifth => g;
 TriOsc ch => g;

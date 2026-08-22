@@ -1,4 +1,6 @@
-// oscillators/noise.ck — filtered noise bed (air / rain / grit under the mix).
+// oscillators/noise.ck — filtered noise into rackBus (load master.ck first).
+
+global Gain rackBus;
 
 // @knob min=0 max=0.4 step=0.01 default=0.08
 global float nz_amp;
@@ -21,7 +23,7 @@ global float nz_gateHz;
 0.0 => nz_hp;
 0.0 => nz_gateHz;
 
-Noise n => HPF hp => BPF bp => Gain g => dac;
+Noise n => HPF hp => BPF bp => Gain g => rackBus;
 0.0 => n.gain;
 80.0 => hp.freq;
 1.0 => g.gain;

@@ -1,0 +1,277 @@
+:root {
+  --rail: #8a9098;
+  --rail-dark: #5c636b;
+  --case-bg: #1a1c1e;
+  --face: #2a2e33;
+  --face-master: #32383f;
+  --screw: #c4c8ce;
+  --label: #c8cdd4;
+  --muted: #8b929a;
+  --knob-face: #3a4048;
+  --knob-tick: #e8eaed;
+  --accent: #6b9e7a;
+  font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: #0e0f10;
+  color: var(--label);
+  overflow: hidden;
+}
+
+.rails {
+  height: 18px;
+  background: linear-gradient(
+    180deg,
+    var(--rail) 0%,
+    var(--rail-dark) 45%,
+    var(--rail) 100%
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  position: relative;
+}
+
+.rails::before,
+.rails::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #ddd, #666);
+  border: 1px solid #444;
+}
+
+.rails::before {
+  left: 12px;
+}
+.rails::after {
+  right: 12px;
+}
+
+.case {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 6px;
+  padding: 10px 12px;
+  height: calc(100% - 36px);
+  overflow-x: auto;
+  overflow-y: hidden;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 19px,
+      rgba(255, 255, 255, 0.015) 19px,
+      rgba(255, 255, 255, 0.015) 20px
+    ),
+    var(--case-bg);
+}
+
+.empty {
+  margin: auto;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+  max-width: 360px;
+}
+
+.empty code {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.module {
+  flex: 0 0 168px;
+  min-width: 168px;
+  max-width: 200px;
+  background: linear-gradient(180deg, #333840 0%, var(--face) 12%, #25292e 100%);
+  border: 1px solid #111;
+  border-radius: 2px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 2px 6px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  padding: 10px 8px 12px;
+  position: relative;
+  overflow: hidden;
+}
+
+.module.master {
+  flex-basis: 196px;
+  min-width: 196px;
+  background: linear-gradient(180deg, #3a424c 0%, var(--face-master) 14%, #2a3038 100%);
+  border-color: #1e252c;
+}
+
+.module::before,
+.module::after {
+  content: "";
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #eee, var(--screw));
+  border: 1px solid #555;
+  top: 6px;
+}
+
+.module::before {
+  left: 6px;
+}
+.module::after {
+  right: 6px;
+}
+
+.mod-head {
+  text-align: center;
+  margin: 4px 0 10px;
+  padding: 0 10px;
+  flex-shrink: 0;
+}
+
+.mod-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--label);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mod-id {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.mod-accent {
+  height: 3px;
+  margin: 0 4px 8px;
+  border-radius: 1px;
+  opacity: 0.9;
+  flex-shrink: 0;
+}
+
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 4px;
+}
+
+.cell {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.cell-name {
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.cell-value {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--label);
+}
+
+.dial {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+  background:
+    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.16), transparent 42%),
+    var(--knob-face);
+  box-shadow:
+    inset 0 1px 2px rgba(255, 255, 255, 0.1),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.4),
+    0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.dial-pointer {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2px;
+  height: 18px;
+  margin-left: -1px;
+  margin-top: -18px;
+  transform-origin: bottom center;
+  background: var(--knob-tick);
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+.dial.active {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.cell-slider {
+  width: 100%;
+  padding: 0 4px;
+  align-items: stretch;
+}
+
+.slider-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.cell-slider input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+button.bang {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 1px solid #111;
+  background: radial-gradient(circle at 35% 30%, #5a616a, #2e3339);
+  color: var(--label);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+button.bang:active {
+  transform: scale(0.95);
+}

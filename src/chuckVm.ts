@@ -25,7 +25,7 @@ export class ChuckVm {
   }
 
   get running(): boolean {
-    return !!this.proc && !this.proc.killed;
+    return !!this.proc && this.proc.exitCode === null && !this.proc.killed;
   }
 
   async start(): Promise<void> {
@@ -36,6 +36,12 @@ export class ChuckVm {
 
     const { executable, otfPort, vmArgs } = getConfig();
     this.pidFile = path.join(os.tmpdir(), `chuck-live-${otfPort}.pid`);
+    // Stale pid from a previous crash blocks readiness checks.
+    try {
+      fs.unlinkSync(this.pidFile);
+    } catch {
+      /* ignore */
+    }
 
     const args = [
       '--loop',
@@ -68,12 +74,38 @@ export class ChuckVm {
       this.clearProc();
     });
 
-    // Brief wait so OTF listener is up before bridge/add.
-    await sleep(400);
+    // pw-jack / JACK can take well over 400ms — wait until OTF answers.
+    const ready = await this.waitUntilReady(8000);
     if (!this.running) {
       return;
     }
+    if (!ready) {
+      this.output.appendLine(
+        '[warn] OTF listener not ready — Add shred / bridge may fail until it is'
+      );
+      vscode.window.showWarningMessage(
+        'ChucK VM started but OTF is not answering yet — wait a moment, then Add again'
+      );
+    }
     this._onStatus.fire(true);
+  }
+
+  /** Poll until `chuck --port ^` succeeds or the process dies. */
+  private async waitUntilReady(timeoutMs: number): Promise<boolean> {
+    const { executable, otfPort } = getConfig();
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (!this.running) {
+        return false;
+      }
+      try {
+        await runChuck(executable, [`--port:${otfPort}`, '^']);
+        return true;
+      } catch {
+        await sleep(150);
+      }
+    }
+    return false;
   }
 
   async stop(): Promise<void> {

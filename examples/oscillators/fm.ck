@@ -1,4 +1,6 @@
-// oscillators/fm.ck — 2-op FM (carrier × modulator); metallic / bell / growl.
+// oscillators/fm.ck — 2-op FM into rackBus (load master.ck first).
+
+global Gain rackBus;
 
 // @knob min=0 max=0.5 step=0.01 default=0.15
 global float fm_amp;
@@ -22,7 +24,7 @@ global float fm_fb;
 0.2 => fm_fb;
 
 SinOsc mod => blackhole;
-SinOsc car => dac;
+SinOsc car => rackBus;
 0.0 => car.gain;
 0.0 => mod.gain;
 

@@ -1,4 +1,6 @@
-// oscillators/lfo-sine.ck — slow sine for pads / drones (wide range, gentle defaults).
+// oscillators/lfo-sine.ck — slow pad into rackBus (load master.ck first).
+
+global Gain rackBus;
 
 // @knob min=0 max=0.6 step=0.01 default=0.22
 global float lfo_amp;
@@ -21,8 +23,10 @@ global float lfo_space;
 8.0 => lfo_depth;
 0.4 => lfo_space;
 
-SinOsc a => Gain g => NRev rev => dac;
+SinOsc a => Gain g => NRev rev;
 SinOsc b => g;
+rev.chan(0) => rackBus;
+rev.chan(1) => rackBus;
 0.0 => a.gain;
 0.0 => b.gain;
 0.15 => rev.mix;
@@ -38,7 +42,6 @@ fun void follow() {
 
     now / second => float t;
     lfo_center + Math.sin(2.0 * Math.PI * lfo_rate * t) * lfo_depth => a.freq;
-    // slight stereo-ish detune via second osc
     a.freq() * 1.005 => b.freq;
     5::ms => now;
   }
