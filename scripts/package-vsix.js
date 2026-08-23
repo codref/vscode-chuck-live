@@ -24,6 +24,7 @@ const include = [
   'syntaxes',
   'chuck',
   'examples',
+  'templates',
   'bin',
 ];
 
@@ -67,6 +68,7 @@ const contentTypes = `<?xml version="1.0" encoding="utf-8"?>
   <Default Extension=".js" ContentType="application/javascript"/>
   <Default Extension=".css" ContentType="text/css"/>
   <Default Extension=".md" ContentType="text/markdown"/>
+  <Default Extension=".mdc" ContentType="text/markdown"/>
   <Default Extension=".ck" ContentType="text/plain"/>
   <Default Extension=".svg" ContentType="image/svg+xml"/>
   <Default Extension=".map" ContentType="application/json"/>

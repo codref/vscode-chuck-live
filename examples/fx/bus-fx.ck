@@ -26,6 +26,7 @@ mainBus => Gain intoWet => Echo echo => NRev rev => Gain crushG => Gain wet => s
 1.0 => dry.gain;
 0.0 => intoWet.gain;
 0.0 => wet.gain;
+800::ms => echo.max;
 280::ms => echo.delay;
 0.35 => echo.mix;
 0.55 => echo.gain;
@@ -41,7 +42,7 @@ fun void follow() {
     fx_mix => intoWet.gain;
     fx_mix => wet.gain;
 
-    Math.max(50.0, fx_delay)::ms => echo.delay;
+    Math.max(50.0, Math.min(800.0, fx_delay))::ms => echo.delay;
     fx_feedback => echo.gain;
     fx_reverb * 0.5 => rev.mix;
 

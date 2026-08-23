@@ -13,8 +13,10 @@
   ],
   "activationEvents": [
     "onLanguage:chuck",
-    "onView:chuckLive.shreds",
-    "onView:chuckLive.knobs"
+    "onView:chuckLive.control",
+    "onView:chuckLive.sessionShreds",
+    "onView:chuckLive.knobs",
+    "onView:chuckLive.sessionMeter"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -38,6 +40,15 @@
         "path": "./syntaxes/chuck.tmLanguage.json"
       }
     ],
+    "configurationDefaults": {
+      "[chuck]": {
+        "editor.quickSuggestions": {
+          "other": true,
+          "comments": true,
+          "strings": false
+        }
+      }
+    },
     "commands": [
       {
         "command": "chuckLive.startVm",
@@ -56,7 +67,7 @@
       },
       {
         "command": "chuckLive.replaceShred",
-        "title": "ChucK: Replace / Live Update",
+        "title": "ChucK: Reload Shred",
         "icon": "$(sync)"
       },
       {
@@ -66,7 +77,8 @@
       },
       {
         "command": "chuckLive.removeAll",
-        "title": "ChucK: Remove All Shreds"
+        "title": "ChucK: Remove All Shreds",
+        "icon": "$(clear-all)"
       },
       {
         "command": "chuckLive.refreshStatus",
@@ -79,11 +91,6 @@
         "icon": "$(refresh)"
       },
       {
-        "command": "chuckLive.toggleKnobsScope",
-        "title": "ChucK: Toggle Knobs Scope (Current / All)",
-        "icon": "$(list-tree)"
-      },
-      {
         "command": "chuckLive.openRack",
         "title": "ChucK: Open Rack",
         "icon": "$(circuit-board)"
@@ -92,6 +99,20 @@
         "command": "chuckLive.openSequencer",
         "title": "ChucK: Open Sequencer",
         "icon": "$(grabber)"
+      },
+      {
+        "command": "chuckLive.initProject",
+        "title": "ChucK: Init Project Library",
+        "icon": "$(folder-library)"
+      },
+      {
+        "command": "chuckLive.initProjectForce",
+        "title": "ChucK: Re-init Project Library (force)"
+      },
+      {
+        "command": "chuckLive.showSession",
+        "title": "ChucK: Show Session (Shreds + Meter)",
+        "icon": "$(list-unordered)"
       }
     ],
     "keybindings": [
@@ -114,48 +135,69 @@
           "id": "chuckLive",
           "title": "ChucK Live",
           "icon": "media/chuck-icon.svg"
+        },
+        {
+          "id": "chuckLiveSession",
+          "title": "ChucK Session",
+          "icon": "media/chuck-session-icon.svg"
         }
       ]
     },
     "views": {
       "chuckLive": [
         {
-          "id": "chuckLive.shreds",
-          "name": "Shreds"
-        },
-        {
           "type": "webview",
           "id": "chuckLive.knobs",
           "name": "Knobs"
         }
+      ],
+      "chuckLiveSession": [
+        {
+          "id": "chuckLive.control",
+          "name": "Control"
+        },
+        {
+          "id": "chuckLive.sessionShreds",
+          "name": "Shreds"
+        },
+        {
+          "type": "webview",
+          "id": "chuckLive.sessionMeter",
+          "name": "Meter"
+        }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "chuckLive.control",
+        "contents": "Start the ChucK VM, then add `.ck` files as shreds from the editor.\n\n[Start VM](command:chuckLive.startVm)\n\n[Init Project Library](command:chuckLive.initProject)\n\n**Knobs** for the active file stay under the **ChucK Live** activity icon."
+      },
+      {
+        "view": "chuckLive.sessionShreds",
+        "contents": "No shreds loaded yet.\n\n1. **Start VM** from **Control** above\n2. **Add Current File** (`Ctrl+Shift+.`) from a `.ck` editor\n3. **Reload** (`Ctrl+.`) or the inline sync icon to hot-swap a loaded shred\n4. Drag shreds to reorder the list (and rack)\n\n[Open Rack](command:chuckLive.openRack)\n\n[Open Sequencer](command:chuckLive.openSequencer)"
+      }
+    ],
     "menus": {
       "view/title": [
         {
           "command": "chuckLive.startVm",
-          "when": "view == chuckLive.shreds",
+          "when": "view == chuckLive.control",
           "group": "navigation@1"
         },
         {
           "command": "chuckLive.stopVm",
-          "when": "view == chuckLive.shreds",
+          "when": "view == chuckLive.control",
           "group": "navigation@2"
         },
         {
           "command": "chuckLive.refreshStatus",
-          "when": "view == chuckLive.shreds",
+          "when": "view == chuckLive.control",
           "group": "navigation@3"
         },
         {
-          "command": "chuckLive.openRack",
-          "when": "view == chuckLive.shreds",
+          "command": "chuckLive.initProject",
+          "when": "view == chuckLive.control",
           "group": "navigation@4"
-        },
-        {
-          "command": "chuckLive.openSequencer",
-          "when": "view == chuckLive.shreds",
-          "group": "navigation@5"
         },
         {
           "command": "chuckLive.refreshKnobs",
@@ -163,16 +205,53 @@
           "group": "navigation@1"
         },
         {
-          "command": "chuckLive.toggleKnobsScope",
-          "when": "view == chuckLive.knobs",
+          "command": "chuckLive.openRack",
+          "when": "view == chuckLive.sessionShreds",
+          "group": "navigation@1"
+        },
+        {
+          "command": "chuckLive.openSequencer",
+          "when": "view == chuckLive.sessionShreds",
           "group": "navigation@2"
+        },
+        {
+          "command": "chuckLive.refreshStatus",
+          "when": "view == chuckLive.sessionShreds",
+          "group": "navigation@3"
+        },
+        {
+          "command": "chuckLive.removeAll",
+          "when": "view == chuckLive.sessionShreds",
+          "group": "navigation@4"
         }
       ],
       "view/item/context": [
         {
+          "command": "chuckLive.replaceShred",
+          "when": "view == chuckLive.sessionShreds && viewItem == chuckUserShred",
+          "group": "inline@1"
+        },
+        {
           "command": "chuckLive.removeShred",
-          "when": "view == chuckLive.shreds",
-          "group": "inline"
+          "when": "view == chuckLive.sessionShreds && viewItem == chuckUserShred",
+          "group": "inline@2"
+        },
+        {
+          "command": "chuckLive.removeShred",
+          "when": "view == chuckLive.sessionShreds && viewItem == chuckManagedShred",
+          "group": "inline@1"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "chuckLive.addShred",
+          "when": "editorLangId == chuck",
+          "group": "navigation@1"
+        },
+        {
+          "command": "chuckLive.replaceShred",
+          "when": "editorLangId == chuck",
+          "group": "navigation@2"
         }
       ],
       "editor/context": [
@@ -206,6 +285,11 @@
           "default": 9000,
           "description": "UDP port for knob OSC messages (bridge.ck listens here)"
         },
+        "chuckLive.meterPort": {
+          "type": "number",
+          "default": 9001,
+          "description": "UDP port for VU meter peaks (meter.ck sends here)"
+        },
         "chuckLive.vmArgs": {
           "type": "array",
           "items": {
@@ -217,7 +301,12 @@
         "chuckLive.saveBeforeAdd": {
           "type": "boolean",
           "default": true,
-          "description": "Save the active editor before add/replace"
+          "description": "Save the active editor before add/reload"
+        },
+        "chuckLive.initLibraryDir": {
+          "type": "string",
+          "default": "chuck",
+          "description": "Default folder name when running ChucK: Init Project Library"
         }
       }
     }

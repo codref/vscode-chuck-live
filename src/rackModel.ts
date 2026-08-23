@@ -19,8 +19,11 @@ export interface RackModule {
 export function buildModulesFromShreds(shredOps: ShredOps): RackModule[] {
   const modules: RackModule[] = [];
 
-  for (const shred of shredOps.list()) {
-    if (!isFileModule(shred.source, shred.isBridge)) {
+  for (const shred of shredOps.listVisible()) {
+    if (!isFileModule(shred.source, {
+      isBridge: shred.isBridge,
+      isMeter: shred.isMeter,
+    })) {
       continue;
     }
     const file = resolveChuckPath(shred.source);
@@ -39,11 +42,12 @@ export function buildModulesFromShreds(shredOps: ShredOps): RackModule[] {
     });
   }
 
+  // listVisible already applies user order; keep master first within that list
   modules.sort((a, b) => {
     if (a.isMaster !== b.isMaster) {
       return a.isMaster ? -1 : 1;
     }
-    return a.id - b.id;
+    return 0; // stable — preserve listVisible order
   });
 
   return modules;

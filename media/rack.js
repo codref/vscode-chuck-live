@@ -130,7 +130,8 @@
     const btn = document.createElement('button');
     btn.className = 'bang';
     btn.type = 'button';
-    btn.textContent = 'BANG';
+    btn.textContent = shortName(k.name);
+    btn.title = k.name;
     btn.addEventListener('click', () => {
       vscode.postMessage({ type: 'button', name: k.name });
     });

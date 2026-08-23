@@ -1,0 +1,41 @@
+---
+description: ChucK Live bus architecture, load order, and annotation conventions
+globs: "**/*.ck"
+alwaysApply: true
+---
+
+# ChucK Live project rules
+
+## Bus graph
+
+`rackBus` (instruments) → `master.ck` → `mainBus` → **one** speaker output (`out/dac-out.ck` or `fx/bus-fx.ck`) → `dac`.
+
+Optional: `out/record-out.ck` taps `mainBus → WvOut` (no `dac`). Add/remove anytime while the speaker output stays loaded.
+
+Never connect bus instruments directly to `dac`. Never load dac-out and bus-fx together.
+
+## Load order
+
+1. Start VM  
+2. `oscillators/master.ck`  
+3. Instruments / drums (live add/remove OK)  
+4. One of `out/dac-out.ck` or `fx/bus-fx.ck`  
+5. Optional `out/record-out.ck` when recording  
+
+## Globals
+
+- Instruments declare `global Gain rackBus;` and patch into it.
+- Master declares `rackBus` and `mainBus` and routes between them.
+- Output and record shreds declare `global Gain mainBus;`.
+
+## Annotations
+
+Place `// @knob`, `// @slider`, `// @button`, `// @seq`, or `// @seqGate` on the line **above** the matching `global`. Knobs panel shows the **active file** only; Rack shows all loaded modules. Button UI uses the **event name**.
+
+## Live coding
+
+Use `spork ~ follow()` to mirror OSC globals into UGen params. Use **Reload** (`Ctrl+.`) or the Shreds inline sync icon to hot-swap shreds. Keep global names unique across the session.
+
+## Standalone
+
+`standalone/*.ck` uses direct `=> dac` and does not use `rackBus`.

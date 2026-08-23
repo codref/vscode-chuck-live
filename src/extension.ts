@@ -3,20 +3,50 @@ import * as path from 'path';
 import { ChuckVm } from './chuckVm';
 import { getConfig, setExtensionPath } from './config';
 import { OscClient } from './oscClient';
-import { ShredOps, ShredTreeProvider, ShredInfo } from './shredOps';
+import { OscServer } from './oscServer';
+import {
+  ShredOps,
+  ShredTreeProvider,
+  ShredTreeDragAndDropController,
+  ShredInfo,
+  isFileModule,
+} from './shredOps';
 import { StatusBar } from './statusBar';
 import { KnobsPanelProvider, collectAnnotations } from './knobsPanel';
 import { writeBridgeFile } from './bridgeGen';
+import { writeMeterFile } from './meterGen';
 import { RackPanel } from './rackPanel';
 import { SeqPanel } from './seqPanel';
+import { MeterPanelProvider } from './meterPanel';
+import { runInitProjectCommand } from './projectInit';
+import { AnnotationCompletionProvider } from './annotationComplete';
+import { ControlTreeProvider } from './controlView';
+
+async function revealSessionViews(): Promise<void> {
+  try {
+    await vscode.commands.executeCommand(
+      'workbench.view.extension.chuckLiveSession'
+    );
+  } catch {
+    /* ignore */
+  }
+  try {
+    await vscode.commands.executeCommand('chuckLive.sessionShreds.focus');
+  } catch {
+    /* ignore */
+  }
+}
 
 export function activate(context: vscode.ExtensionContext): void {
   setExtensionPath(context.extensionPath);
   const vm = new ChuckVm();
-  const shredOps = new ShredOps(vm);
+  const shredOps = new ShredOps(vm, context.workspaceState);
   const osc = new OscClient();
+  const oscServer = new OscServer();
   const statusBar = new StatusBar(vm);
   const tree = new ShredTreeProvider(shredOps);
+  const control = new ControlTreeProvider(vm);
+  const shredDnd = new ShredTreeDragAndDropController(shredOps);
 
   const loadBridge = async (
     bridgePath: string,
@@ -49,18 +79,37 @@ export function activate(context: vscode.ExtensionContext): void {
     loadBridge
   );
 
+  const meter = new MeterPanelProvider(context.extensionUri, oscServer);
+
   context.subscriptions.push(
     vm,
     osc,
+    oscServer,
     statusBar,
     { dispose: () => rack.dispose() },
     { dispose: () => seq.dispose() },
-    vscode.window.registerTreeDataProvider('chuckLive.shreds', tree),
+    { dispose: () => meter.dispose() },
+    vscode.window.createTreeView('chuckLive.sessionShreds', {
+      treeDataProvider: tree,
+      dragAndDropController: shredDnd,
+      showCollapseAll: false,
+    }),
+    vscode.window.registerTreeDataProvider('chuckLive.control', control),
     vscode.window.registerWebviewViewProvider(KnobsPanelProvider.viewType, knobs),
+    vscode.window.registerWebviewViewProvider(MeterPanelProvider.viewType, meter),
+    vscode.languages.registerCompletionItemProvider(
+      { language: 'chuck' },
+      new AnnotationCompletionProvider(),
+      '@',
+      ' ',
+      '='
+    ),
     vm.onStatusChange((on) => {
       if (!on) {
         shredOps.clearLocal();
+        meter.reset();
       }
+      control.refresh();
       if (rack.isOpen) {
         void rack.refresh(false);
       }
@@ -85,24 +134,36 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!vm.running) {
         return;
       }
+      const { oscPort, meterPort } = getConfig();
+      oscServer.listen(meterPort);
+
       // Load OSC bridge from current annotations (may be empty at first).
       const anns = collectAnnotations(shredOps);
-      const { oscPort } = getConfig();
       const bridge = writeBridgeFile(anns, oscPort);
       try {
         await shredOps.loadBridge(bridge.path, bridge.source);
       } catch (err) {
         vscode.window.showWarningMessage(`Bridge load: ${err}`);
       }
+
+      const meterFile = writeMeterFile(meterPort);
+      try {
+        await shredOps.loadMeter(meterFile.path, meterFile.source);
+      } catch (err) {
+        vscode.window.showWarningMessage(`Meter load: ${err}`);
+      }
+
       await knobs.refresh(false);
       if (rack.isOpen) {
         void rack.refresh(false);
       }
+      await revealSessionViews();
       vscode.window.showInformationMessage('ChucK VM started');
     }),
 
     cmd('chuckLive.stopVm', async () => {
       await vm.stop();
+      meter.reset();
       vscode.window.showInformationMessage('ChucK VM stopped');
     }),
 
@@ -126,8 +187,29 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
 
-    cmd('chuckLive.replaceShred', async () => {
-      const file = await activeChuckFile();
+    cmd('chuckLive.replaceShred', async (item?: ShredInfo) => {
+      let file: string | undefined;
+      if (
+        item &&
+        typeof item.id === 'number' &&
+        item.source &&
+        isFileModule(item.source, {
+          isBridge: item.isBridge,
+          isMeter: item.isMeter,
+        })
+      ) {
+        file = item.source;
+        if (getConfig().saveBeforeAdd) {
+          const doc = vscode.workspace.textDocuments.find(
+            (d) => path.resolve(d.fileName) === path.resolve(file!)
+          );
+          if (doc?.isDirty) {
+            await doc.save();
+          }
+        }
+      } else {
+        file = await activeChuckFile();
+      }
       if (!file) {
         return;
       }
@@ -141,7 +223,7 @@ export function activate(context: vscode.ExtensionContext): void {
         } else {
           await shredOps.replace(file, existing);
           vscode.window.showInformationMessage(
-            `Replaced shred #${existing}`
+            `Reloaded shred #${existing}`
           );
         }
         await knobs.refresh(true);
@@ -173,8 +255,12 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       try {
         await shredOps.remove(id);
+        await knobs.refresh(true);
         if (rack.isOpen) {
           void rack.refresh(false);
+        }
+        if (seq.isOpen) {
+          void seq.ensureBridge().then(() => seq.pushTargets());
         }
       } catch (err) {
         vscode.window.showErrorMessage(String(err));
@@ -191,6 +277,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (seq.isOpen) {
           void seq.ensureBridge().then(() => seq.pushTargets());
         }
+        meter.reset();
       } catch (err) {
         vscode.window.showErrorMessage(String(err));
       }
@@ -200,6 +287,7 @@ export function activate(context: vscode.ExtensionContext): void {
       try {
         await shredOps.status();
         tree.refresh();
+        control.refresh();
       } catch (err) {
         vscode.window.showErrorMessage(String(err));
       }
@@ -209,16 +297,24 @@ export function activate(context: vscode.ExtensionContext): void {
       await knobs.refresh(true);
     }),
 
-    cmd('chuckLive.toggleKnobsScope', () => {
-      knobs.toggleScope();
-    }),
-
     cmd('chuckLive.openRack', () => {
       rack.open();
     }),
 
     cmd('chuckLive.openSequencer', () => {
       seq.open();
+    }),
+
+    cmd('chuckLive.showSession', async () => {
+      await revealSessionViews();
+    }),
+
+    cmd('chuckLive.initProject', async () => {
+      await runInitProjectCommand(context.extensionPath);
+    }),
+
+    cmd('chuckLive.initProjectForce', async () => {
+      await runInitProjectCommand(context.extensionPath, { force: true });
     })
   );
 

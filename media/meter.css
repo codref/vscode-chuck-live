@@ -1,0 +1,149 @@
+:root {
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  --meter-track: color-mix(in srgb, var(--vscode-sideBar-background) 50%, #555 50%);
+  --meter-fill: color-mix(in srgb, var(--vscode-charts-green, #3d9) 75%, #9d9 25%);
+  --meter-warn: #e0b040;
+  --meter-clip: var(--vscode-charts-red, #e55);
+  --meter-peak: #f2f2f2;
+  --meter-led-off: color-mix(in srgb, var(--vscode-foreground) 18%, transparent);
+}
+
+body {
+  margin: 0;
+  padding: 8px 10px 6px;
+  box-sizing: border-box;
+}
+
+.meter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.channel {
+  display: grid;
+  grid-template-columns: 14px 1fr 10px 36px;
+  align-items: center;
+  gap: 6px;
+}
+
+.bar-wrap {
+  position: relative;
+  height: 12px;
+  background: var(--meter-track);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0%;
+  background: linear-gradient(
+    to right,
+    var(--meter-fill) 0%,
+    var(--meter-fill) 72%,
+    var(--meter-warn) 88%,
+    var(--meter-clip) 100%
+  );
+  transition: width 40ms linear;
+}
+
+.bar.clip {
+  box-shadow: inset -10px 0 12px -4px color-mix(in srgb, var(--meter-clip) 70%, transparent);
+}
+
+.peak-mark {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  width: 3px;
+  left: 0%;
+  background: var(--meter-peak);
+  border-radius: 1px;
+  box-shadow: 0 0 4px color-mix(in srgb, var(--meter-peak) 80%, transparent);
+  opacity: 0;
+  transform: translateX(-1px);
+  pointer-events: none;
+  transition: opacity 80ms linear;
+}
+
+.peak-mark.on {
+  opacity: 1;
+}
+
+.peak-mark.clip {
+  background: var(--meter-clip);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--meter-clip) 90%, transparent);
+}
+
+.peak-led {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--meter-led-off);
+  box-shadow: inset 0 0 2px rgba(0, 0, 0, 0.4);
+  transition: background 60ms linear, box-shadow 60ms linear;
+}
+
+.peak-led.on {
+  background: var(--meter-warn);
+  box-shadow:
+    0 0 6px color-mix(in srgb, var(--meter-warn) 85%, transparent),
+    inset 0 0 1px rgba(255, 255, 255, 0.35);
+}
+
+.peak-led.clip {
+  background: var(--meter-clip);
+  box-shadow:
+    0 0 8px color-mix(in srgb, var(--meter-clip) 90%, transparent),
+    inset 0 0 1px rgba(255, 255, 255, 0.4);
+}
+
+.label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  opacity: 0.85;
+  text-align: center;
+}
+
+.db {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+  text-align: right;
+}
+
+.db.clip {
+  color: var(--meter-clip);
+  opacity: 1;
+}
+
+.scale {
+  display: grid;
+  grid-template-columns: 14px 1fr 10px 36px;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  user-select: none;
+}
+
+.scale-ticks {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  opacity: 0.45;
+  padding: 0 1px;
+}
+
+.scale-spacer,
+.scale-led-spacer,
+.scale-db-spacer {
+  display: block;
+}

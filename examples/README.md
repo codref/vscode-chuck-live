@@ -1,5 +1,7 @@
 # ChucK Live examples
 
+Bundled **module library** shipped with the extension. To copy into your own project (with AI agent guides), run **ChucK: Init Project Library** from the command palette or Shreds toolbar.
+
 Patches for the **ChucK Live** extension. For install / commands, see the [root README](../README.md).
 
 ## Prerequisites
@@ -12,20 +14,37 @@ Patches for the **ChucK Live** extension. For install / commands, see the [root 
 
 ```text
 osc / voice / drums ──► rackBus ──► master.ck ──► mainBus ──► dac-out.ck ──► dac
-                                                         └─► fx/bus-fx.ck ──► dac
+                                                         ├─► fx/bus-fx.ck ──► dac
+                                                         └─► record-out.ck ──► WvOut (optional tap)
 ```
 
-Load **either** [`out/dac-out.ck`](out/dac-out.ck) **or** [`fx/bus-fx.ck`](fx/bus-fx.ck) after master — not both (double `dac`).
+Load **one** speaker output after master: [`out/dac-out.ck`](out/dac-out.ck) **or** [`fx/bus-fx.ck`](fx/bus-fx.ck) — not both (double `dac`).
+
+Add [`out/record-out.ck`](out/record-out.ck) **anytime** after master to capture `mainBus` to WAV. It does **not** connect to `dac`, so it is safe to load/unload mid-session while dac-out or bus-fx stays up.
 
 ### Load order
 
 1. Start VM  
 2. [`oscillators/master.ck`](oscillators/master.ck)  
-3. Instruments / drums (any order)  
-4. **`out/dac-out.ck` or `fx/bus-fx.ck`**  
-5. Open Sequencer / Rack  
+3. Instruments / drums (any order; add/remove live as you like)  
+4. **`out/dac-out.ck` or `fx/bus-fx.ck`** (keep for the set)  
+5. Optionally **`out/record-out.ck`** when you want to record (add/remove freely)  
+6. Open Sequencer / Rack  
 
 Without master, bus modules are silent. Without dac-out/fx, `mainBus` never reaches the speakers.
+
+### Recording (`record-out.ck`)
+
+Tap-only shred: `mainBus → WvOut → blackhole`. Leave your output shred loaded.
+
+1. Edit `OUT_PATH` at the top of the file (e.g. `"my-take.wav"`).  
+2. **Add** `record-out.ck` (master + dac-out/fx already running).  
+3. Open `record-out.ck` in the editor (Knobs shows the **active file** only).  
+4. Click **rec_toggle** once to start, again to stop and flush the file.  
+5. Watch **Output → ChucK** for `recording →` / `saved` lines.  
+6. **Remove** the record shred when done — audio keeps playing.
+
+Records the **post-master** mix. With `bus-fx.ck`, the file is pre-FX (same tap point as dry `mainBus`).
 
 ## Standalone demos (direct `dac`)
 
@@ -97,6 +116,7 @@ global Event dk_kick;
 - **Sync clocks** + Master BPM = shared 16ths  
 - **Scale** snaps MIDI tracks (default phrygian)  
 - Gate tracks: pads only (drums)
+- **A/B banks** per track: **Dup→standby** copies the live bank; edit the other tab while A plays; **Queue** swaps at the end of the 16-step cycle; **Swap now** switches immediately
 
 ## Not yet
 

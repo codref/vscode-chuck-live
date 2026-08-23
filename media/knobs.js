@@ -1,9 +1,8 @@
 (function () {
   const vscode = acquireVsCodeApi();
   const root = document.getElementById('root');
-  const toolbar = document.getElementById('toolbar');
-  /** Remember last values + scope across refreshes. */
-  const saved = vscode.getState() || { values: {}, scope: 'current' };
+  /** Remember last values across refreshes. */
+  const saved = vscode.getState() || { values: {} };
 
   // Travel angle: -135° … +135° (270° sweep)
   const ANGLE_MIN = -135;
@@ -12,42 +11,11 @@
   window.addEventListener('message', (event) => {
     const msg = event.data;
     if (msg.type === 'setKnobs') {
-      if (msg.scope) {
-        saved.scope = msg.scope;
-        vscode.setState(saved);
-      }
-      renderToolbar(msg.scope || saved.scope || 'current');
       render(msg.groups || []);
     }
   });
 
   vscode.postMessage({ type: 'ready' });
-
-  function renderToolbar(scope) {
-    if (!toolbar) return;
-    toolbar.innerHTML = '';
-
-    const current = document.createElement('button');
-    current.type = 'button';
-    current.className = 'scope-btn' + (scope === 'current' ? ' active' : '');
-    current.textContent = 'Current file';
-    current.title = 'Show knobs from the active .ck editor only';
-    current.addEventListener('click', () => {
-      vscode.postMessage({ type: 'setScope', scope: 'current' });
-    });
-
-    const all = document.createElement('button');
-    all.type = 'button';
-    all.className = 'scope-btn' + (scope === 'all' ? ' active' : '');
-    all.textContent = 'All (grouped)';
-    all.title = 'Show knobs from every open / loaded .ck file, grouped by file';
-    all.addEventListener('click', () => {
-      vscode.postMessage({ type: 'setScope', scope: 'all' });
-    });
-
-    toolbar.appendChild(current);
-    toolbar.appendChild(all);
-  }
 
   function render(groups) {
     if (!root) return;
@@ -57,26 +25,13 @@
     if (!total) {
       const p = document.createElement('p');
       p.className = 'empty';
-      p.textContent =
-        saved.scope === 'current'
-          ? 'No annotations in the current .ck file.'
-          : 'No @knob / @button annotations in open or loaded .ck files.';
+      p.textContent = 'No annotations in the current .ck file.';
       root.appendChild(p);
       return;
     }
 
-    const showHeaders = groups.length > 1 || saved.scope === 'all';
-
     for (const g of groups) {
       if (!g.knobs || !g.knobs.length) continue;
-
-      if (showHeaders) {
-        const h = document.createElement('div');
-        h.className = 'group-title';
-        h.textContent = g.title || 'file';
-        h.title = g.file || g.title || '';
-        root.appendChild(h);
-      }
 
       const grid = document.createElement('div');
       grid.className = 'grid';
@@ -106,7 +61,7 @@
     const btn = document.createElement('button');
     btn.className = 'bang';
     btn.type = 'button';
-    btn.textContent = 'BANG';
+    btn.textContent = buttonLabel(k.name);
     btn.title = k.name;
     btn.addEventListener('click', () => {
       vscode.postMessage({ type: 'button', name: k.name });
@@ -317,5 +272,11 @@
   function fmt(n) {
     if (Number.isInteger(n)) return String(n);
     return n.toFixed(3).replace(/\.?0+$/, '') || '0';
+  }
+
+  /** Button caption = event name (not a generic "BANG"). */
+  function buttonLabel(name) {
+    const s = String(name || 'go');
+    return s.length > 12 ? s.slice(0, 11) + '…' : s;
   }
 })();

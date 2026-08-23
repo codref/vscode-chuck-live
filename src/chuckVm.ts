@@ -35,6 +35,9 @@ export class ChuckVm {
     }
 
     const { executable, otfPort, vmArgs } = getConfig();
+    // Clear orphaned listeners (e.g. after reload) so the port is free.
+    await this.killListener(executable, otfPort);
+
     this.pidFile = path.join(os.tmpdir(), `chuck-live-${otfPort}.pid`);
     // Stale pid from a previous crash blocks readiness checks.
     try {
@@ -113,15 +116,24 @@ export class ChuckVm {
       return;
     }
     const { executable, otfPort } = getConfig();
-    try {
-      await runChuck(executable, [`--port:${otfPort}`, '--kill']);
-    } catch {
-      // fall through to SIGTERM
-    }
+    await this.killListener(executable, otfPort);
     if (this.proc && !this.proc.killed) {
       this.proc.kill('SIGTERM');
     }
     this.clearProc();
+  }
+
+  /** `chuck --port:N --kill` — clears orphans even if we lost the child handle. */
+  private async killListener(
+    executable: string,
+    otfPort: number
+  ): Promise<void> {
+    this.output.appendLine(`$ ${executable} --port:${otfPort} --kill`);
+    try {
+      await runChuck(executable, [`--port:${otfPort}`, '--kill']);
+    } catch {
+      // nothing listening — fine
+    }
   }
 
   dispose(): void {

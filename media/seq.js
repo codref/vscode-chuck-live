@@ -108,6 +108,82 @@
     return cand;
   }
 
+  /** Ensure A/B banks; migrate legacy flat values/gates. */
+  function ensureBanks(p) {
+    if (p.banks && p.banks.A && p.banks.B) {
+      if (p.activeBank !== 'A' && p.activeBank !== 'B') p.activeBank = 'A';
+      if (p.editBank !== 'A' && p.editBank !== 'B') p.editBank = 'A';
+      if (p.queued !== 'A' && p.queued !== 'B') p.queued = null;
+    } else {
+      const values = Array.isArray(p.values) ? p.values.slice() : Array(16).fill(0);
+      const gates = Array.isArray(p.gates) ? p.gates.slice() : Array(16).fill(1);
+      while (values.length < 16) values.push(values[values.length - 1] || 0);
+      while (gates.length < 16) gates.push(1);
+      p.banks = {
+        A: { values: values.slice(0, 16), gates: gates.slice(0, 16) },
+        B: { values: values.slice(0, 16), gates: gates.slice(0, 16) },
+      };
+      p.activeBank = 'A';
+      p.editBank = 'A';
+      p.queued = null;
+    }
+    // Edit grid always aliases the selected bank arrays
+    p.values = p.banks[p.editBank].values;
+    p.gates = p.banks[p.editBank].gates;
+  }
+
+  function liveBank(p) {
+    ensureBanks(p);
+    return p.banks[p.activeBank];
+  }
+
+  function standbyBankId(p) {
+    return p.activeBank === 'A' ? 'B' : 'A';
+  }
+
+  function setEditBank(p, bank) {
+    ensureBanks(p);
+    p.editBank = bank;
+    p.values = p.banks[bank].values;
+    p.gates = p.banks[bank].gates;
+  }
+
+  /** Copy live (active) bank into standby; switch edit to standby. */
+  function dupLiveToStandby(p) {
+    ensureBanks(p);
+    const src = p.banks[p.activeBank];
+    const dstId = standbyBankId(p);
+    p.banks[dstId] = {
+      values: src.values.slice(),
+      gates: src.gates.slice(),
+    };
+    setEditBank(p, dstId);
+  }
+
+  function queueStandby(p) {
+    ensureBanks(p);
+    p.queued = standbyBankId(p);
+  }
+
+  function clearQueue(p) {
+    p.queued = null;
+  }
+
+  /** Immediate swap: standby becomes live. */
+  function swapNow(p) {
+    ensureBanks(p);
+    p.activeBank = standbyBankId(p);
+    p.queued = null;
+  }
+
+  /** Apply queued bank when a 16-step cycle wraps. */
+  function applyQueueOnWrap(p) {
+    if (!p || !p.queued) return false;
+    p.activeBank = p.queued;
+    p.queued = null;
+    return true;
+  }
+
   function ensurePattern(t) {
     if (patterns[t.name]) {
       const p = patterns[t.name];
@@ -118,6 +194,7 @@
       p.quant = t.step;
       if (p.playhead === undefined) p.playhead = 0;
       if (t.gate && !p.gate) p.gate = t.gate;
+      ensureBanks(p);
       return p;
     }
     let values;
@@ -158,6 +235,7 @@
       max: t.max,
       quant: t.step,
     };
+    ensureBanks(patterns[t.name]);
     return patterns[t.name];
   }
 
@@ -255,8 +333,9 @@
   function fireStep(targetName, idx) {
     const p = patterns[targetName];
     if (!p) return;
-    const gateOn = p.gates[idx] > 0.5;
-    let value = p.values[idx];
+    const live = liveBank(p);
+    const gateOn = live.gates[idx] > 0.5;
+    let value = live.values[idx];
     if (p.kind !== 'gate' && p.mode === 'midi') {
       value = snapMidi(value);
     }
@@ -310,14 +389,18 @@
       }
     }
     masterTimer = setInterval(() => {
+      const prev = sharedPlayhead;
       sharedPlayhead = (sharedPlayhead + 1) % 16;
+      const wrapped = prev === 15 && sharedPlayhead === 0;
       for (const name of trackOrder) {
         const p = patterns[name];
         if (!p || !p.running) continue;
+        if (wrapped) applyQueueOnWrap(p);
         p.playhead = sharedPlayhead;
         fireStep(name, sharedPlayhead);
         updatePlayhead(name);
       }
+      if (wrapped) refreshBankChromeAll();
     }, ms);
   }
 
@@ -341,10 +424,44 @@
     const ms = (60 / Math.max(40, p.bpm) / 4) * 1000;
     fireStep(name, p.playhead);
     timers[name] = setInterval(() => {
+      const prev = p.playhead;
       p.playhead = (p.playhead + 1) % 16;
+      if (prev === 15 && p.playhead === 0) {
+        applyQueueOnWrap(p);
+        refreshBankChrome(name);
+      }
       fireStep(name, p.playhead);
       updatePlayhead(name);
     }, ms);
+  }
+
+  function refreshBankChrome(name) {
+    if (!tracksEl) return;
+    const track = tracksEl.querySelector('.track[data-target="' + name + '"]');
+    if (!track) return;
+    const p = patterns[name];
+    if (!p) return;
+    ensureBanks(p);
+    track.querySelectorAll('.bank-btn').forEach((btn) => {
+      const id = btn.dataset.bank;
+      btn.classList.toggle('active', p.editBank === id);
+      btn.classList.toggle('live', p.activeBank === id);
+      btn.classList.toggle('queued', p.queued === id);
+      const liveMark = p.activeBank === id ? '●' : '';
+      const queueMark = p.queued === id ? '…' : '';
+      btn.textContent = id + liveMark + queueMark;
+    });
+    const queueBtn = track.querySelector('.btn-queue');
+    if (queueBtn) {
+      queueBtn.classList.toggle('active', !!p.queued);
+      queueBtn.textContent = p.queued
+        ? 'Queued → ' + p.queued
+        : 'Queue ' + standbyBankId(p);
+    }
+  }
+
+  function refreshBankChromeAll() {
+    for (const name of trackOrder) refreshBankChrome(name);
   }
 
   function updatePlayhead(name) {
@@ -356,9 +473,12 @@
     track.classList.toggle('running', !!(p && p.running));
     const runBtn = track.querySelector('.btn-run');
     if (runBtn) runBtn.classList.toggle('active', !!(p && p.running));
+    // Playhead only when viewing the live bank
+    const showPh = !!(p && p.running && p.editBank === p.activeBank);
     track.querySelectorAll('.step').forEach((el, idx) => {
-      el.classList.toggle('playhead', !!(p && p.running && idx === ph));
+      el.classList.toggle('playhead', showPh && idx === ph);
     });
+    refreshBankChrome(name);
   }
 
   function makeGateStep(i, p) {
@@ -548,6 +668,66 @@
     bar.appendChild(btnStop);
     bar.appendChild(btnReset);
 
+    // A/B banks: edit one while the other plays; queue swap at end of 16
+    const bankGroup = document.createElement('div');
+    bankGroup.className = 'bank-group';
+    for (const id of ['A', 'B']) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'bank-btn';
+      b.dataset.bank = id;
+      b.title =
+        id === p.activeBank
+          ? 'Bank ' + id + ' (live — playing)'
+          : 'Bank ' + id + ' (edit)';
+      b.addEventListener('click', () => {
+        setEditBank(p, id);
+        persist();
+        render();
+      });
+      bankGroup.appendChild(b);
+    }
+    bar.appendChild(bankGroup);
+
+    const btnDup = document.createElement('button');
+    btnDup.type = 'button';
+    btnDup.textContent = 'Dup→standby';
+    btnDup.title = 'Copy live bank into standby and edit it';
+    btnDup.addEventListener('click', () => {
+      dupLiveToStandby(p);
+      persist();
+      render();
+    });
+
+    const btnQueue = document.createElement('button');
+    btnQueue.type = 'button';
+    btnQueue.className = 'btn-queue';
+    btnQueue.title = 'After this 16-step cycle, switch to the standby bank';
+    btnQueue.addEventListener('click', () => {
+      if (p.queued) {
+        clearQueue(p);
+      } else {
+        queueStandby(p);
+      }
+      persist();
+      refreshBankChrome(name);
+    });
+
+    const btnSwap = document.createElement('button');
+    btnSwap.type = 'button';
+    btnSwap.textContent = 'Swap now';
+    btnSwap.title = 'Immediately make standby the live bank';
+    btnSwap.addEventListener('click', () => {
+      swapNow(p);
+      persist();
+      refreshBankChrome(name);
+      updatePlayhead(name);
+    });
+
+    bar.appendChild(btnDup);
+    bar.appendChild(btnQueue);
+    bar.appendChild(btnSwap);
+
     if (!syncClocks) {
       const bpmLab = document.createElement('label');
       bpmLab.className = 'bpm';
@@ -573,14 +753,18 @@
     btnRemove.addEventListener('click', () => removeTrack(name));
     bar.appendChild(btnRemove);
 
+    const gridScroll = document.createElement('div');
+    gridScroll.className = 'grid-scroll';
+
     const grid = document.createElement('div');
     grid.className = 'grid' + (p.kind === 'gate' ? ' grid-gate' : '');
     for (let i = 0; i < 16; i++) {
       grid.appendChild(makeStep(i, p));
     }
 
+    gridScroll.appendChild(grid);
     track.appendChild(bar);
-    track.appendChild(grid);
+    track.appendChild(gridScroll);
     return track;
   }
 
@@ -613,7 +797,7 @@
         scaleName +
         ' · ' +
         trackOrder.length +
-        ' track(s)';
+        ' track(s) · A/B banks: Dup→standby, Queue (end of 16), Swap now';
     }
 
     for (const name of trackOrder) {
@@ -674,11 +858,17 @@
   if (scaleSel) {
     scaleSel.addEventListener('change', () => {
       scaleName = scaleSel.value || 'phrygian';
-      // re-snap midi patterns
+      // re-snap midi patterns (both banks)
       for (const name of trackOrder) {
         const p = patterns[name];
         if (!p || p.mode !== 'midi' || p.kind === 'gate') continue;
-        for (let i = 0; i < 16; i++) p.values[i] = snapMidi(p.values[i]);
+        ensureBanks(p);
+        for (const id of ['A', 'B']) {
+          for (let i = 0; i < 16; i++) {
+            p.banks[id].values[i] = snapMidi(p.banks[id].values[i]);
+          }
+        }
+        setEditBank(p, p.editBank);
       }
       persist();
       render();

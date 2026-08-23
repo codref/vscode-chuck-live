@@ -14,9 +14,6 @@ import { writeBridgeFile } from './bridgeGen';
 import { ShredOps, isFileModule } from './shredOps';
 import { resolveChuckPath } from './chuckPaths';
 
-/** How the knobs panel lists controls. */
-export type KnobsScope = 'current' | 'all';
-
 export interface KnobGroup {
   /** Absolute path, or empty for untitled */
   file: string;
@@ -25,9 +22,8 @@ export interface KnobGroup {
 }
 
 /**
- * Sidebar webview: dials/sliders/buttons from annotations.
- * Scope: current file only, or all sources grouped by file.
- * OSC bridge always receives the union of all knobs (so hidden groups still work).
+ * Sidebar webview: dials/sliders/buttons from the active .ck file.
+ * OSC bridge always receives the union of all knobs (rack / other files still work).
  */
 export class KnobsPanelProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'chuckLive.knobs';
@@ -35,7 +31,6 @@ export class KnobsPanelProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private groups: KnobGroup[] = [];
   private allForBridge: Annotation[] = [];
-  private scope: KnobsScope = 'current';
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -62,28 +57,14 @@ export class KnobsPanelProvider implements vscode.WebviewViewProvider {
     void this.refresh();
   }
 
-  setScope(scope: KnobsScope): void {
-    this.scope = scope;
-    void this.refresh(false);
-  }
-
-  toggleScope(): void {
-    this.setScope(this.scope === 'current' ? 'all' : 'current');
-  }
-
-  getScope(): KnobsScope {
-    return this.scope;
-  }
-
   /** Re-scan sources; update UI. Optionally regenerate OSC bridge from *all* knobs. */
   async refresh(reloadBridge = true): Promise<Annotation[]> {
     const sources = collectAnnotationSources(this.shredOps);
     this.allForBridge = mergeAnnotations(sources.map((s) => s.annotations));
-    this.groups = groupsForScope(sources, this.scope);
+    this.groups = groupsForCurrentFile(sources);
 
     this.view?.webview.postMessage({
       type: 'setKnobs',
-      scope: this.scope,
       groups: this.groups,
     });
 
@@ -103,20 +84,15 @@ export class KnobsPanelProvider implements vscode.WebviewViewProvider {
     type: string;
     name?: string;
     value?: number;
-    scope?: KnobsScope;
   }): void {
     const { oscPort } = getConfig();
     if (msg.type === 'knob' && msg.name !== undefined && msg.value !== undefined) {
       this.osc.sendFloat('127.0.0.1', oscPort, `/chuck/${msg.name}`, msg.value);
     } else if (msg.type === 'button' && msg.name !== undefined) {
       this.osc.sendInt('127.0.0.1', oscPort, `/chuck/${msg.name}`, 1);
-    } else if (msg.type === 'setScope' && (msg.scope === 'current' || msg.scope === 'all')) {
-      this.scope = msg.scope;
-      void this.refresh(false);
     } else if (msg.type === 'ready') {
       this.view?.webview.postMessage({
         type: 'setKnobs',
-        scope: this.scope,
         groups: this.groups,
       });
     }
@@ -139,7 +115,6 @@ export class KnobsPanelProvider implements vscode.WebviewViewProvider {
   <link rel="stylesheet" href="${css}" />
 </head>
 <body>
-  <div id="toolbar" class="toolbar"></div>
   <div id="root">
     <p class="hint">Annotate with <code>// @knob</code>, <code>// @slider</code>, or <code>// @button</code>.</p>
   </div>
@@ -174,7 +149,14 @@ export function collectAnnotationSources(
   }
 
   for (const shred of shredOps.list()) {
-    if (shred.isBridge || !isFileModule(shred.source, shred.isBridge)) {
+    if (
+      shred.isBridge ||
+      shred.isMeter ||
+      !isFileModule(shred.source, {
+        isBridge: shred.isBridge,
+        isMeter: shred.isMeter,
+      })
+    ) {
       continue;
     }
     const abs = resolveChuckPath(shred.source);
@@ -208,24 +190,18 @@ export function collectSeqTargets(shredOps: ShredOps): SeqTarget[] {
   return seqTargetsFromAnnotations(collectAnnotations(shredOps));
 }
 
-function groupsForScope(
-  sources: AnnotationSource[],
-  scope: KnobsScope
-): KnobGroup[] {
-  let filtered = sources;
-  if (scope === 'current') {
-    const active = vscode.window.activeTextEditor?.document;
-    if (!active || (active.languageId !== 'chuck' && !active.fileName.endsWith('.ck'))) {
-      return [];
-    }
-    const abs = path.resolve(active.fileName);
-    filtered = sources.filter((s) => s.file === abs);
-    // Active file may be open with no prior source entry if empty — parse live
-    if (!filtered.length) {
-      const annotations = parseAnnotations(active.getText(), active.fileName);
-      if (annotations.length) {
-        filtered = [{ file: abs, annotations }];
-      }
+/** Knobs for the active editor only (rack covers cross-file). */
+function groupsForCurrentFile(sources: AnnotationSource[]): KnobGroup[] {
+  const active = vscode.window.activeTextEditor?.document;
+  if (!active || (active.languageId !== 'chuck' && !active.fileName.endsWith('.ck'))) {
+    return [];
+  }
+  const abs = path.resolve(active.fileName);
+  let filtered = sources.filter((s) => s.file === abs);
+  if (!filtered.length) {
+    const annotations = parseAnnotations(active.getText(), active.fileName);
+    if (annotations.length) {
+      filtered = [{ file: abs, annotations }];
     }
   }
 

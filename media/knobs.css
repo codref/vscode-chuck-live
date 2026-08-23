@@ -12,45 +12,6 @@ body {
   padding: 8px 10px 16px;
 }
 
-.toolbar {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 10px;
-}
-
-.scope-btn {
-  flex: 1;
-  padding: 4px 6px;
-  font-size: 11px;
-  border: 1px solid var(--vscode-button-border, transparent);
-  background: var(--vscode-button-secondaryBackground);
-  color: var(--vscode-button-secondaryForeground);
-  cursor: pointer;
-}
-
-.scope-btn.active {
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
-}
-
-.scope-btn:hover:not(.active) {
-  background: var(--vscode-button-secondaryHoverBackground);
-}
-
-.group-title {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  opacity: 0.85;
-  margin: 10px 0 6px;
-  padding-bottom: 2px;
-  border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 18%, transparent);
-}
-
-.group-title:first-child {
-  margin-top: 0;
-}
-
 .hint {
   opacity: 0.75;
   font-size: 12px;

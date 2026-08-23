@@ -21,6 +21,7 @@ export function getConfig() {
     executable: resolveExecutable(configured),
     otfPort: c.get<number>('otfPort', 8888),
     oscPort: c.get<number>('oscPort', 9000),
+    meterPort: c.get<number>('meterPort', 9001),
     vmArgs: c.get<string[]>('vmArgs', []),
     saveBeforeAdd: c.get<boolean>('saveBeforeAdd', true),
   };

@@ -18,10 +18,12 @@ html,
 body {
   margin: 0;
   height: 100%;
+  overflow: hidden;
   background: var(--bg);
   color: var(--text);
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .bar {
@@ -89,7 +91,8 @@ body {
 }
 
 #tracks {
-  flex: 1;
+  flex: 1 1 0;
+  min-height: 0;
   overflow: auto;
   padding: 10px 14px 18px;
   display: flex;
@@ -101,7 +104,7 @@ body {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 6px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .track.running {
@@ -159,12 +162,58 @@ body {
   opacity: 0.7;
 }
 
+.bank-group {
+  display: flex;
+  gap: 2px;
+  margin-left: 4px;
+}
+
+.bank-btn {
+  min-width: 28px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid var(--line);
+  background: #2a303a;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.bank-btn.active {
+  border-color: var(--accent);
+  color: var(--text);
+  background: #3a3030;
+}
+
+.bank-btn.live {
+  box-shadow: inset 0 -2px 0 var(--play);
+  color: var(--play);
+}
+
+.bank-btn.queued {
+  outline: 1px dashed var(--accent);
+}
+
+.btn-queue.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.grid-scroll {
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  width: 100%;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(16, minmax(40px, 1fr));
   gap: 4px;
   padding: 10px;
-  overflow-x: auto;
+  box-sizing: border-box;
+  /* Stretch to panel width; scroll horizontally when below 16×40px + gaps */
+  width: max(100%, calc(16 * 40px + 15 * 4px + 20px));
 }
 
 .step {
