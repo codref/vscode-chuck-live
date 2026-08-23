@@ -1,5 +1,6 @@
 // minibrute/voice.ck — MiniBrute-inspired monosynth into rackBus.
-// Load order: oscillators/master.ck → voice.ck → Open Sequencer (bind mb_noteHz).
+// Load order: oscillators/master.ck → voice.ck → out/dac-out.ck (or fx/bus-fx.ck)
+// Sequencer: bind mb_noteHz (midi) + gate mb_gate.
 
 global Gain rackBus;
 

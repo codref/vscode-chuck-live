@@ -1,8 +1,9 @@
-// oscillators/master.ck — shared mix bus + master filters.
-// Load THIS FIRST, then Add other oscillators/*.ck (they feed rackBus).
-// Without master, bus-aware oscillators are silent.
+// oscillators/master.ck — shared mix bus + master filters → mainBus.
+// Load THIS FIRST, then Add instruments/drums, then dac-out.ck OR fx/bus-fx.ck.
+// Without master, bus-aware modules are silent. Without dac-out/fx, mainBus has no dac.
 
 global Gain rackBus;
+global Gain mainBus;
 
 // @knob min=0 max=1 step=0.01 default=0.75
 global float master_amp;
@@ -25,9 +26,10 @@ global float master_drive;
 40.0 => master_hp;
 0.0 => master_drive;
 
-// rackBus => HPF => drive => LPF => out => dac
-rackBus => HPF hp => Gain drive => LPF lpf => Gain out => dac;
+// rackBus => HPF => drive => LPF => out => mainBus (not dac)
+rackBus => HPF hp => Gain drive => LPF lpf => Gain out => mainBus;
 1.0 => rackBus.gain;
+1.0 => mainBus.gain;
 40.0 => hp.freq;
 1.0 => drive.gain;
 8000.0 => lpf.freq;

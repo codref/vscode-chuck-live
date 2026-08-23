@@ -9,12 +9,11 @@ import {
 } from './knobsPanel';
 
 /**
- * 16-step sequencer bound to any OSC-mapped float (+ optional gate Event).
- * Host/UI owns the clock; each tick writes the bound param over OSC.
+ * Cascade sequencer: float lanes + gate-only Event tracks.
+ * Host/UI owns the clock; each tick writes OSC.
  */
 export class SeqPanel {
   private panel: vscode.WebviewPanel | undefined;
-  /** Serialize bridge ensure + OSC so fire never races a cold OscIn. */
   private bridgeGate: Promise<unknown> = Promise.resolve();
 
   constructor(
@@ -76,7 +75,6 @@ export class SeqPanel {
     }
   }
 
-  /** Refresh target list after shred add/replace. */
   pushTargets(): void {
     if (!this.panel) {
       return;
@@ -114,6 +112,7 @@ export class SeqPanel {
     target?: string;
     gate?: string;
     mode?: string;
+    kind?: string;
     value?: number;
     gateOn?: boolean;
   }): Promise<void> {
@@ -124,8 +123,15 @@ export class SeqPanel {
 
     const { oscPort } = getConfig();
 
-    if (msg.type === 'fire' && msg.target !== undefined && msg.value !== undefined) {
+    if (msg.type === 'fire' && msg.target !== undefined) {
       if (msg.gateOn === false) {
+        return;
+      }
+      if (msg.kind === 'gate') {
+        this.osc.sendInt('127.0.0.1', oscPort, `/chuck/${msg.target}`, 1);
+        return;
+      }
+      if (msg.value === undefined) {
         return;
       }
       let v = msg.value;
@@ -161,13 +167,28 @@ export class SeqPanel {
   <header class="bar">
     <div class="title">Sequencer cascade</div>
     <div class="bar-actions">
+      <label class="pick">Scale
+        <select id="scale">
+          <option value="chromatic">chromatic</option>
+          <option value="minor">minor</option>
+          <option value="dorian">dorian</option>
+          <option value="phrygian" selected>phrygian</option>
+          <option value="pentatonic_min">pentatonic min</option>
+        </select>
+      </label>
+      <label class="bpm">Master BPM
+        <input type="number" id="masterBpm" min="40" max="200" value="120" />
+      </label>
+      <label class="pick sync">
+        <input type="checkbox" id="syncClocks" checked /> Sync clocks
+      </label>
       <select id="addTarget" title="Parameter to sequence"></select>
       <button type="button" id="btnAdd">Add track</button>
       <button type="button" id="btnRunAll">Run all</button>
       <button type="button" id="btnStopAll">Stop all</button>
     </div>
   </header>
-  <p class="hint" id="hint">Each track sequences one float · independent Run/Stop</p>
+  <p class="hint" id="hint">Tracks · scale lock (midi) · sync = shared 16ths</p>
   <div id="tracks"></div>
   <script nonce="${nonce}" src="${js}"></script>
 </body>

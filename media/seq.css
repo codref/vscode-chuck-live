@@ -231,6 +231,33 @@ body {
   border-color: #5cba8a;
 }
 
+.gate.big {
+  width: 36px;
+  height: 48px;
+  margin-top: 8px;
+}
+
+.step-gate {
+  min-height: 80px;
+  justify-content: flex-start;
+}
+
+.grid-gate {
+  min-height: auto;
+}
+
+.track-gate .track-bar {
+  background: #1a2220;
+}
+
+.sync {
+  gap: 4px;
+}
+
+.sync input {
+  accent-color: var(--accent);
+}
+
 .empty {
   padding: 24px 14px;
   color: var(--muted);

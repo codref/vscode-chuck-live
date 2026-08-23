@@ -43,16 +43,18 @@ export interface Annotation {
   isSeqGate?: boolean;
 }
 
-/** A float (or preferred @seq) the Sequencer panel can drive. */
+/** A float or gate-only Event the Sequencer panel can drive. */
 export interface SeqTarget {
   name: string;
+  /** float = value lane; gate = Event trigger pads only */
+  kind: 'float' | 'gate';
   mode: SeqMode;
   min: number;
   max: number;
   step: number;
   default: number;
   gate?: string;
-  /** From explicit @seq */
+  /** From explicit @seq or @seqGate */
   preferred: boolean;
   file?: string;
 }
@@ -118,7 +120,7 @@ export function parseAnnotations(
   return out;
 }
 
-/** Float knobs (+ optional Event gates) for the Sequencer panel. */
+/** Float knobs + @seqGate Events for the Sequencer panel. */
 export function seqTargetsFromAnnotations(anns: Annotation[]): SeqTarget[] {
   const gateNames = new Set(
     anns
@@ -137,6 +139,7 @@ export function seqTargetsFromAnnotations(anns: Annotation[]): SeqTarget[] {
     const max = f.max ?? (mode === 'midi' ? 84 : 1);
     return {
       name: f.name,
+      kind: 'float' as const,
       mode,
       min,
       max,
@@ -148,9 +151,28 @@ export function seqTargetsFromAnnotations(anns: Annotation[]): SeqTarget[] {
     };
   });
 
+  for (const a of anns) {
+    if (a.kind === 'button' && a.type === 'Event' && a.isSeqGate) {
+      targets.push({
+        name: a.name,
+        kind: 'gate',
+        mode: 'raw',
+        min: 0,
+        max: 1,
+        step: 1,
+        default: 1,
+        preferred: true,
+        file: a.file,
+      });
+    }
+  }
+
   targets.sort((a, b) => {
     if (a.preferred !== b.preferred) {
       return a.preferred ? -1 : 1;
+    }
+    if (a.kind !== b.kind) {
+      return a.kind === 'gate' ? -1 : 1;
     }
     return a.name.localeCompare(b.name);
   });

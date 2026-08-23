@@ -32,9 +32,9 @@ cursor --install-extension chuck-live-0.1.0.vsix
 
 ### Mixable oscillators (`examples/oscillators/`)
 
-Load **`master.ck` first**, then any oscillators. They share `global Gain rackBus`; master applies cutoff / HP / amp to the sum. Details and knob tables: [examples/README.md](examples/README.md).
+Load **`master.ck` first**, then instruments/drums, then **`out/dac-out.ck` or `fx/bus-fx.ck`**. Modules share `rackBus`; master writes `mainBus`. Details: [examples/README.md](examples/README.md).
 
-Standalone: `demo.ck`, `cyberpunk.ck` (direct `dac`, no bus).
+Cyberpunk bus recipe: [examples/cyberpunk/README.md](examples/cyberpunk/README.md). Standalone: `demo.ck`, `cyberpunk.ck` (direct `dac`).
 
 ## Annotations
 
