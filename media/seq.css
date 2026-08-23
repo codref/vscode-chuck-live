@@ -111,6 +111,18 @@ body {
   border-color: #5a4a30;
 }
 
+.track.muted {
+  opacity: 0.45;
+}
+
+.track.solo {
+  border-color: #3d6a8f;
+}
+
+.track.editing-standby {
+  outline: 1px dashed var(--accent);
+}
+
 .track-bar {
   display: flex;
   align-items: center;
@@ -233,6 +245,12 @@ body {
   box-shadow: 0 0 0 1px var(--play);
 }
 
+.step.fired {
+  border-color: #7ec8ff;
+  box-shadow: 0 0 0 2px #7ec8ff;
+  background: #1a2838;
+}
+
 .step-num {
   font-size: 9px;
   color: var(--muted);
@@ -273,11 +291,20 @@ body {
   background: #222830;
   cursor: pointer;
   padding: 0;
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+  --prob: 1;
 }
 
 .gate.on {
-  background: var(--gate-on);
+  background: color-mix(in srgb, var(--gate-on) calc(var(--prob) * 100%), #222830);
   border-color: #5cba8a;
+  opacity: calc(0.35 + var(--prob) * 0.65);
+}
+
+.gate:not(.on) {
+  opacity: calc(0.4 + var(--prob) * 0.35);
 }
 
 .gate.big {

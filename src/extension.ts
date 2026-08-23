@@ -21,6 +21,8 @@ import { MeterPanelProvider } from './meterPanel';
 import { runInitProjectCommand } from './projectInit';
 import { AnnotationCompletionProvider } from './annotationComplete';
 import { ControlTreeProvider } from './controlView';
+import { ShredCodeLensProvider } from './shredLens';
+import { confirmAddGuardrails } from './shredGuardrails';
 
 async function revealSessionViews(): Promise<void> {
   try {
@@ -104,6 +106,10 @@ export function activate(context: vscode.ExtensionContext): void {
       ' ',
       '='
     ),
+    vscode.languages.registerCodeLensProvider(
+      [{ language: 'chuck' }, { pattern: '**/*.ck' }],
+      new ShredCodeLensProvider(shredOps)
+    ),
     vm.onStatusChange((on) => {
       if (!on) {
         shredOps.clearLocal();
@@ -173,6 +179,9 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       try {
+        if (!(await confirmAddGuardrails(file, shredOps))) {
+          return;
+        }
         await shredOps.add(file);
         await knobs.refresh(true);
         if (rack.isOpen) {
@@ -186,6 +195,10 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.window.showErrorMessage(String(err));
       }
     }),
+
+    cmd('chuckLive.runShred', () =>
+      vscode.commands.executeCommand('chuckLive.replaceShred')
+    ),
 
     cmd('chuckLive.replaceShred', async (item?: ShredInfo) => {
       let file: string | undefined;
@@ -214,6 +227,9 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       try {
+        if (!(await confirmAddGuardrails(file, shredOps))) {
+          return;
+        }
         const existing = shredOps.idForPath(file);
         if (existing === undefined) {
           await shredOps.add(file);

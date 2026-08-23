@@ -22,6 +22,8 @@
   let scaleName = saved.scaleName || 'phrygian';
   let masterBpm = saved.masterBpm || 120;
   let syncClocks = saved.syncClocks !== undefined ? !!saved.syncClocks : true;
+  /** Master kill-switch: when false, all swing delays are ignored. */
+  let swingEnabled = saved.swingEnabled === true;
   let sharedPlayhead = 0;
   /** @type {any} */
   let masterTimer = null;
@@ -32,16 +34,21 @@
   let gateOptions = [];
   /** @type {Record<string, any>} */
   const timers = {};
+  /** @type {Record<string, any>} */
+  const swingTimers = {};
 
   const tracksEl = document.getElementById('tracks');
   const addSel = document.getElementById('addTarget');
   const btnAdd = document.getElementById('btnAdd');
   const btnRunAll = document.getElementById('btnRunAll');
   const btnStopAll = document.getElementById('btnStopAll');
+  const btnSaveAs = document.getElementById('btnSaveAs');
+  const btnLoad = document.getElementById('btnLoad');
   const hintEl = document.getElementById('hint');
   const scaleSel = document.getElementById('scale');
   const masterBpmIn = document.getElementById('masterBpm');
   const syncChk = document.getElementById('syncClocks');
+  const swingEnableChk = document.getElementById('swingEnabled');
 
   const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
@@ -76,6 +83,7 @@
       scaleName: scaleName,
       masterBpm: masterBpm,
       syncClocks: syncClocks,
+      swingEnabled: swingEnabled,
     });
   }
 
@@ -84,6 +92,18 @@
     if (quant >= 1) x = Math.round(x);
     else if (quant > 0) x = Math.round(x / quant) * quant;
     return x;
+  }
+
+  function clampSwing(s) {
+    const n = Number(s);
+    if (!Number.isFinite(n)) return 0;
+    return Math.max(0, Math.min(1, n));
+  }
+
+  function clampProb(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return 1;
+    return Math.max(0, Math.min(1, n));
   }
 
   function snapMidi(m) {
@@ -108,6 +128,20 @@
     return cand;
   }
 
+  function defaultProbs() {
+    return Array(16).fill(1);
+  }
+
+  function normalizeProbs(arr) {
+    const out = Array.isArray(arr) ? arr.slice(0, 16) : [];
+    while (out.length < 16) out.push(1);
+    return out.map(clampProb);
+  }
+
+  function ensureBankProbs(bank) {
+    bank.probs = normalizeProbs(bank.probs);
+  }
+
   /** Ensure A/B banks; migrate legacy flat values/gates. */
   function ensureBanks(p) {
     if (p.banks && p.banks.A && p.banks.B) {
@@ -117,19 +151,32 @@
     } else {
       const values = Array.isArray(p.values) ? p.values.slice() : Array(16).fill(0);
       const gates = Array.isArray(p.gates) ? p.gates.slice() : Array(16).fill(1);
+      const probs = Array.isArray(p.probs) ? p.probs.slice() : defaultProbs();
       while (values.length < 16) values.push(values[values.length - 1] || 0);
       while (gates.length < 16) gates.push(1);
+      while (probs.length < 16) probs.push(1);
       p.banks = {
-        A: { values: values.slice(0, 16), gates: gates.slice(0, 16) },
-        B: { values: values.slice(0, 16), gates: gates.slice(0, 16) },
+        A: {
+          values: values.slice(0, 16),
+          gates: gates.slice(0, 16),
+          probs: normalizeProbs(probs),
+        },
+        B: {
+          values: values.slice(0, 16),
+          gates: gates.slice(0, 16),
+          probs: normalizeProbs(probs),
+        },
       };
       p.activeBank = 'A';
       p.editBank = 'A';
       p.queued = null;
     }
+    ensureBankProbs(p.banks.A);
+    ensureBankProbs(p.banks.B);
     // Edit grid always aliases the selected bank arrays
     p.values = p.banks[p.editBank].values;
     p.gates = p.banks[p.editBank].gates;
+    p.probs = p.banks[p.editBank].probs;
   }
 
   function liveBank(p) {
@@ -146,6 +193,7 @@
     p.editBank = bank;
     p.values = p.banks[bank].values;
     p.gates = p.banks[bank].gates;
+    p.probs = p.banks[bank].probs;
   }
 
   /** Copy live (active) bank into standby; switch edit to standby. */
@@ -156,6 +204,7 @@
     p.banks[dstId] = {
       values: src.values.slice(),
       gates: src.gates.slice(),
+      probs: normalizeProbs(src.probs),
     };
     setEditBank(p, dstId);
   }
@@ -184,6 +233,13 @@
     return true;
   }
 
+  function ensurePatternFlags(p) {
+    if (p.swing === undefined || p.swing === null) p.swing = 0;
+    else p.swing = clampSwing(p.swing);
+    if (p.muted === undefined) p.muted = false;
+    if (p.solo === undefined) p.solo = false;
+  }
+
   function ensurePattern(t) {
     if (patterns[t.name]) {
       const p = patterns[t.name];
@@ -194,6 +250,7 @@
       p.quant = t.step;
       if (p.playhead === undefined) p.playhead = 0;
       if (t.gate && !p.gate) p.gate = t.gate;
+      ensurePatternFlags(p);
       ensureBanks(p);
       return p;
     }
@@ -225,7 +282,11 @@
     patterns[t.name] = {
       values: values,
       gates: gates,
+      probs: defaultProbs(),
       bpm: masterBpm,
+      swing: 0,
+      muted: false,
+      solo: false,
       running: false,
       playhead: 0,
       gate: t.gate || '',
@@ -330,14 +391,32 @@
     if (changed) persist();
   }
 
+  function trackAudible(name) {
+    const p = patterns[name];
+    if (!p) return false;
+    if (p.muted) return false;
+    const anySolo = trackOrder.some((n) => patterns[n] && patterns[n].solo);
+    if (anySolo && !p.solo) return false;
+    return true;
+  }
+
   function fireStep(targetName, idx) {
     const p = patterns[targetName];
     if (!p) return;
+    if (!trackAudible(targetName)) return;
     const live = liveBank(p);
-    const gateOn = live.gates[idx] > 0.5;
+    let gateOn = live.gates[idx] > 0.5;
+    const prob =
+      live.probs && live.probs[idx] !== undefined ? clampProb(live.probs[idx]) : 1;
+    if (gateOn && prob < 0.999 && Math.random() >= prob) {
+      gateOn = false;
+    }
     let value = live.values[idx];
     if (p.kind !== 'gate' && p.mode === 'midi') {
       value = snapMidi(value);
+    }
+    if (gateOn) {
+      flashFiredStep(targetName, idx);
     }
     vscode.postMessage({
       type: 'fire',
@@ -350,7 +429,61 @@
     });
   }
 
+  function flashFiredStep(name, idx) {
+    if (!tracksEl) return;
+    const track = tracksEl.querySelector('.track[data-target="' + name + '"]');
+    if (!track) return;
+    const el = track.querySelector('.step[data-index="' + idx + '"]');
+    if (!el) return;
+    el.classList.remove('fired');
+    // force reflow so animation retriggers
+    void el.offsetWidth;
+    el.classList.add('fired');
+    setTimeout(() => el.classList.remove('fired'), 120);
+  }
+
+  function stepMsFor(bpm) {
+    return (60 / Math.max(40, bpm) / 4) * 1000;
+  }
+
+  function clearSwingFire(name) {
+    if (swingTimers[name]) {
+      clearTimeout(swingTimers[name]);
+      swingTimers[name] = null;
+    }
+  }
+
+  function clearAllSwingFires() {
+    for (const name of Object.keys(swingTimers)) {
+      clearSwingFire(name);
+    }
+  }
+
+  /** Straight grid fire, or delayed odd step when Swing is enabled. */
+  function emitStep(name, idx) {
+    if (!swingEnabled) {
+      fireStep(name, idx);
+      return;
+    }
+    const p = patterns[name];
+    if (!p) return;
+    const swing = clampSwing(p.swing);
+    if (idx % 2 === 1 && swing > 0) {
+      clearSwingFire(name);
+      const ms = stepMsFor(syncClocks ? masterBpm : p.bpm);
+      const delay = ms * Math.min(swing, 0.85);
+      swingTimers[name] = setTimeout(() => {
+        swingTimers[name] = null;
+        if (!patterns[name] || !patterns[name].running) return;
+        fireStep(name, idx);
+      }, delay);
+    } else {
+      fireStep(name, idx);
+    }
+  }
+
   function stopClock(name) {
+    clearSwingFire(name);
     if (timers[name]) {
       clearInterval(timers[name]);
       timers[name] = null;
@@ -375,17 +508,26 @@
     if (!any) stopMasterTimer();
   }
 
-  function startMasterTimer() {
+  function startMasterTimer(fireNow) {
     stopMasterTimer();
     stopAllIndependent();
-    const ms = (60 / Math.max(40, masterBpm) / 4) * 1000;
-    // fire current shared step for all running
-    for (const name of trackOrder) {
-      const p = patterns[name];
-      if (p && p.running) {
-        p.playhead = sharedPlayhead;
-        fireStep(name, sharedPlayhead);
-        updatePlayhead(name);
+    const ms = stepMsFor(masterBpm);
+    if (fireNow !== false) {
+      for (const name of trackOrder) {
+        const p = patterns[name];
+        if (p && p.running) {
+          p.playhead = sharedPlayhead;
+          emitStep(name, sharedPlayhead);
+          updatePlayhead(name);
+        }
+      }
+    } else {
+      for (const name of trackOrder) {
+        const p = patterns[name];
+        if (p && p.running) {
+          p.playhead = sharedPlayhead;
+          updatePlayhead(name);
+        }
       }
     }
     masterTimer = setInterval(() => {
@@ -397,7 +539,7 @@
         if (!p || !p.running) continue;
         if (wrapped) applyQueueOnWrap(p);
         p.playhead = sharedPlayhead;
-        fireStep(name, sharedPlayhead);
+        emitStep(name, sharedPlayhead);
         updatePlayhead(name);
       }
       if (wrapped) refreshBankChromeAll();
@@ -415,14 +557,15 @@
         startMasterTimer();
       } else {
         p.playhead = sharedPlayhead;
-        fireStep(name, sharedPlayhead);
+        emitStep(name, sharedPlayhead);
         updatePlayhead(name);
       }
       return;
     }
     stopClock(name);
-    const ms = (60 / Math.max(40, p.bpm) / 4) * 1000;
-    fireStep(name, p.playhead);
+    const ms = stepMsFor(p.bpm);
+    emitStep(name, p.playhead);
+    updatePlayhead(name);
     timers[name] = setInterval(() => {
       const prev = p.playhead;
       p.playhead = (p.playhead + 1) % 16;
@@ -430,7 +573,7 @@
         applyQueueOnWrap(p);
         refreshBankChrome(name);
       }
-      fireStep(name, p.playhead);
+      emitStep(name, p.playhead);
       updatePlayhead(name);
     }, ms);
   }
@@ -471,14 +614,88 @@
     const p = patterns[name];
     const ph = p ? p.playhead : 0;
     track.classList.toggle('running', !!(p && p.running));
+    track.classList.toggle('muted', !!(p && p.muted));
+    track.classList.toggle('solo', !!(p && p.solo));
+    track.classList.toggle('editing-standby', !!(p && p.editBank !== p.activeBank));
     const runBtn = track.querySelector('.btn-run');
     if (runBtn) runBtn.classList.toggle('active', !!(p && p.running));
-    // Playhead only when viewing the live bank
-    const showPh = !!(p && p.running && p.editBank === p.activeBank);
-    track.querySelectorAll('.step').forEach((el, idx) => {
+    const muteBtn = track.querySelector('.btn-mute');
+    if (muteBtn) muteBtn.classList.toggle('active', !!(p && p.muted));
+    const soloBtn = track.querySelector('.btn-solo');
+    if (soloBtn) soloBtn.classList.toggle('active', !!(p && p.solo));
+    // Highlight by data-index (not DOM forEach order)
+    const showPh = !!(p && p.running);
+    track.querySelectorAll('.step').forEach((el) => {
+      const idx = Number(el.dataset.index);
       el.classList.toggle('playhead', showPh && idx === ph);
     });
     refreshBankChrome(name);
+  }
+
+  function gateTitle(p, i) {
+    ensureBanks(p);
+    const on = p.gates[i] > 0.5;
+    const pct = Math.round(clampProb(p.probs[i]) * 100);
+    return (on ? 'Gate on' : 'Gate off') + ' · p=' + pct + '% (Shift+drag)';
+  }
+
+  function paintGateProb(gate, p, i) {
+    ensureBanks(p);
+    const prob = clampProb(p.probs[i]);
+    gate.style.setProperty('--prob', String(prob));
+    gate.classList.toggle('on', p.gates[i] > 0.5);
+    gate.title = gateTitle(p, i);
+  }
+
+  function bindGateProb(gate, p, i) {
+    let probDragging = false;
+    let moved = false;
+    let startY = 0;
+    let startProb = 1;
+
+    gate.addEventListener('pointerdown', (e) => {
+      if (!e.shiftKey) return;
+      ensureBanks(p);
+      probDragging = true;
+      moved = false;
+      gate.setPointerCapture(e.pointerId);
+      startY = e.clientY;
+      startProb = clampProb(p.probs[i]);
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    gate.addEventListener('pointermove', (e) => {
+      if (!probDragging) return;
+      const dy = startY - e.clientY;
+      if (Math.abs(dy) > 2) moved = true;
+      p.probs[i] = clampProb(startProb + dy / 100);
+      paintGateProb(gate, p, i);
+    });
+    gate.addEventListener('pointerup', (e) => {
+      if (!probDragging) return;
+      probDragging = false;
+      persist();
+      if (moved) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    });
+    gate.addEventListener('click', (e) => {
+      if (e.shiftKey || moved) {
+        e.preventDefault();
+        e.stopPropagation();
+        moved = false;
+        return;
+      }
+      // While playing, edit the live bank so pads match what you hear
+      if (p.running && p.editBank !== p.activeBank) {
+        setEditBank(p, p.activeBank);
+      }
+      ensureBanks(p);
+      p.gates[i] = p.gates[i] > 0.5 ? 0 : 1;
+      paintGateProb(gate, p, i);
+      persist();
+    });
   }
 
   function makeGateStep(i, p) {
@@ -490,13 +707,9 @@
     num.textContent = String(i + 1);
     const gate = document.createElement('button');
     gate.type = 'button';
-    gate.className = 'gate big' + (p.gates[i] > 0.5 ? ' on' : '');
-    gate.title = 'Trigger';
-    gate.addEventListener('click', () => {
-      p.gates[i] = p.gates[i] > 0.5 ? 0 : 1;
-      gate.classList.toggle('on', p.gates[i] > 0.5);
-      persist();
-    });
+    gate.className = 'gate big';
+    paintGateProb(gate, p, i);
+    bindGateProb(gate, p, i);
     el.appendChild(num);
     el.appendChild(gate);
     return el;
@@ -524,13 +737,9 @@
 
     const gate = document.createElement('button');
     gate.type = 'button';
-    gate.className = 'gate' + (p.gates[i] > 0.5 ? ' on' : '');
-    gate.title = 'Step gate';
-    gate.addEventListener('click', () => {
-      p.gates[i] = p.gates[i] > 0.5 ? 0 : 1;
-      gate.classList.toggle('on', p.gates[i] > 0.5);
-      persist();
-    });
+    gate.className = 'gate';
+    paintGateProb(gate, p, i);
+    bindGateProb(gate, p, i);
 
     function paint() {
       let v = p.values[i];
@@ -584,6 +793,8 @@
     track.className =
       'track' +
       (p.running ? ' running' : '') +
+      (p.muted ? ' muted' : '') +
+      (p.solo ? ' solo' : '') +
       (p.kind === 'gate' ? ' track-gate' : '');
     track.dataset.target = name;
 
@@ -632,6 +843,7 @@
     btnRun.textContent = 'Run';
     btnRun.addEventListener('click', () => {
       p.running = true;
+      setEditBank(p, p.activeBank);
       if (syncClocks) {
         sharedPlayhead = 0;
         p.playhead = 0;
@@ -641,6 +853,7 @@
       startClock(name);
       updatePlayhead(name);
       persist();
+      render();
     });
 
     const btnStop = document.createElement('button');
@@ -664,9 +877,33 @@
       persist();
     });
 
+    const btnMute = document.createElement('button');
+    btnMute.type = 'button';
+    btnMute.className = 'btn-mute' + (p.muted ? ' active' : '');
+    btnMute.textContent = 'M';
+    btnMute.title = 'Mute (clock keeps running)';
+    btnMute.addEventListener('click', () => {
+      p.muted = !p.muted;
+      updatePlayhead(name);
+      persist();
+    });
+
+    const btnSolo = document.createElement('button');
+    btnSolo.type = 'button';
+    btnSolo.className = 'btn-solo' + (p.solo ? ' active' : '');
+    btnSolo.textContent = 'S';
+    btnSolo.title = 'Solo (only soloed tracks fire)';
+    btnSolo.addEventListener('click', () => {
+      p.solo = !p.solo;
+      for (const n of trackOrder) updatePlayhead(n);
+      persist();
+    });
+
     bar.appendChild(btnRun);
     bar.appendChild(btnStop);
     bar.appendChild(btnReset);
+    bar.appendChild(btnMute);
+    bar.appendChild(btnSolo);
 
     // A/B banks: edit one while the other plays; queue swap at end of 16
     const bankGroup = document.createElement('div');
@@ -746,6 +983,26 @@
       bar.appendChild(bpmLab);
     }
 
+    const swingLab = document.createElement('label');
+    swingLab.className = 'bpm swing';
+    swingLab.textContent = 'Swing ';
+    const swingIn = document.createElement('input');
+    swingIn.type = 'number';
+    swingIn.min = '0';
+    swingIn.max = '100';
+    swingIn.value = String(Math.round(clampSwing(p.swing) * 100));
+    swingIn.disabled = !swingEnabled;
+    swingIn.title = swingEnabled
+      ? 'Swing % (odd steps late)'
+      : 'Enable Swing in the header to apply';
+    swingIn.addEventListener('change', () => {
+      p.swing = clampSwing((Number(swingIn.value) || 0) / 100);
+      swingIn.value = String(Math.round(p.swing * 100));
+      persist();
+    });
+    swingLab.appendChild(swingIn);
+    bar.appendChild(swingLab);
+
     const btnRemove = document.createElement('button');
     btnRemove.type = 'button';
     btnRemove.className = 'remove';
@@ -775,6 +1032,7 @@
     if (scaleSel) scaleSel.value = scaleName;
     if (masterBpmIn) masterBpmIn.value = String(masterBpm);
     if (syncChk) syncChk.checked = syncClocks;
+    if (swingEnableChk) swingEnableChk.checked = swingEnabled;
 
     if (!trackOrder.length) {
       const empty = document.createElement('div');
@@ -797,7 +1055,9 @@
         scaleName +
         ' · ' +
         trackOrder.length +
-        ' track(s) · A/B banks: Dup→standby, Queue (end of 16), Swap now';
+        ' track(s) · M/S mute/solo · Shift+drag gate = probability · swing ' +
+        (swingEnabled ? 'ON' : 'OFF') +
+        ' · patterns in .chuck-live/patterns/';
     }
 
     for (const name of trackOrder) {
@@ -805,21 +1065,146 @@
     }
   }
 
-  function resyncRunning() {
+  function resyncRunning(fireNow) {
     stopMasterTimer();
     stopAllIndependent();
     const running = trackOrder.filter((n) => patterns[n] && patterns[n].running);
     if (!running.length) return;
     if (syncClocks) {
-      sharedPlayhead = 0;
+      // Keep shared playhead unless caller already reset it (Run all)
       for (const n of running) {
-        patterns[n].playhead = 0;
         patterns[n].bpm = masterBpm;
+        patterns[n].playhead = sharedPlayhead;
       }
-      startMasterTimer();
+      startMasterTimer(fireNow !== false);
     } else {
       for (const n of running) startClock(n);
     }
+  }
+
+  function exportBank(bank) {
+    return {
+      values: bank.values.slice(0, 16),
+      gates: bank.gates.slice(0, 16),
+      probs: normalizeProbs(bank.probs),
+    };
+  }
+
+  function exportPatternSnapshot(name) {
+    const data = {
+      version: 1,
+      name: name,
+      scaleName: scaleName,
+      masterBpm: masterBpm,
+      syncClocks: syncClocks,
+      swingEnabled: swingEnabled,
+      trackOrder: trackOrder.slice(),
+      patterns: {},
+    };
+    for (const n of trackOrder) {
+      const p = patterns[n];
+      if (!p) continue;
+      ensureBanks(p);
+      ensurePatternFlags(p);
+      data.patterns[n] = {
+        kind: p.kind || 'float',
+        mode: p.mode,
+        bpm: p.bpm,
+        swing: clampSwing(p.swing),
+        muted: !!p.muted,
+        solo: !!p.solo,
+        gate: p.gate || '',
+        activeBank: p.activeBank === 'B' ? 'B' : 'A',
+        editBank: p.editBank === 'B' ? 'B' : 'A',
+        banks: {
+          A: exportBank(p.banks.A),
+          B: exportBank(p.banks.B),
+        },
+      };
+    }
+    return data;
+  }
+
+  function stopEverything() {
+    for (const name of trackOrder) {
+      if (patterns[name]) patterns[name].running = false;
+      stopClock(name);
+    }
+    stopMasterTimer();
+  }
+
+  function applyPatternFile(data) {
+    if (!data || typeof data !== 'object') return;
+    stopEverything();
+
+    if (typeof data.scaleName === 'string' && SCALES[data.scaleName]) {
+      scaleName = data.scaleName;
+    }
+    if (typeof data.masterBpm === 'number') {
+      masterBpm = Math.max(40, Math.min(200, data.masterBpm));
+    }
+    if (typeof data.syncClocks === 'boolean') {
+      syncClocks = data.syncClocks;
+    }
+    if (typeof data.swingEnabled === 'boolean') {
+      swingEnabled = data.swingEnabled;
+    } else {
+      swingEnabled = false;
+    }
+
+    const targetNames = new Set(targets.map((t) => t.name));
+    const incomingOrder = Array.isArray(data.trackOrder) ? data.trackOrder : [];
+    const incomingPatterns =
+      data.patterns && typeof data.patterns === 'object' ? data.patterns : {};
+
+    const nextOrder = [];
+    for (const n of incomingOrder) {
+      if (!targetNames.has(n)) continue;
+      const t = targets.find((x) => x.name === n);
+      if (!t) continue;
+      const src = incomingPatterns[n];
+      ensurePattern(t);
+      const p = patterns[n];
+      if (src && typeof src === 'object') {
+        if (typeof src.bpm === 'number') {
+          p.bpm = Math.max(40, Math.min(200, src.bpm));
+        }
+        p.swing = clampSwing(src.swing);
+        p.muted = !!src.muted;
+        p.solo = !!src.solo;
+        if (typeof src.gate === 'string') p.gate = src.gate;
+        if (src.banks && src.banks.A && src.banks.B) {
+          p.banks = {
+            A: {
+              values: (src.banks.A.values || []).slice(0, 16),
+              gates: (src.banks.A.gates || []).slice(0, 16),
+              probs: normalizeProbs(src.banks.A.probs),
+            },
+            B: {
+              values: (src.banks.B.values || []).slice(0, 16),
+              gates: (src.banks.B.gates || []).slice(0, 16),
+              probs: normalizeProbs(src.banks.B.probs),
+            },
+          };
+          while (p.banks.A.values.length < 16) p.banks.A.values.push(0);
+          while (p.banks.B.values.length < 16) p.banks.B.values.push(0);
+          while (p.banks.A.gates.length < 16) p.banks.A.gates.push(0);
+          while (p.banks.B.gates.length < 16) p.banks.B.gates.push(0);
+          p.activeBank = src.activeBank === 'B' ? 'B' : 'A';
+          p.editBank = src.editBank === 'B' ? 'B' : 'A';
+          p.queued = null;
+        }
+        p.running = false;
+        p.playhead = 0;
+        ensureBanks(p);
+      }
+      nextOrder.push(n);
+    }
+
+    trackOrder = nextOrder;
+    sharedPlayhead = 0;
+    persist();
+    render();
   }
 
   if (btnAdd) {
@@ -836,10 +1221,12 @@
         if (!p) continue;
         p.running = true;
         p.playhead = 0;
+        setEditBank(p, p.activeBank);
       }
-      resyncRunning();
+      resyncRunning(true);
       for (const name of trackOrder) updatePlayhead(name);
       persist();
+      render();
     });
   }
   if (btnStopAll) {
@@ -853,6 +1240,19 @@
       stopMasterTimer();
       for (const name of trackOrder) updatePlayhead(name);
       persist();
+    });
+  }
+  if (btnSaveAs) {
+    btnSaveAs.addEventListener('click', () => {
+      vscode.postMessage({
+        type: 'requestSavePattern',
+        data: exportPatternSnapshot(''),
+      });
+    });
+  }
+  if (btnLoad) {
+    btnLoad.addEventListener('click', () => {
+      vscode.postMessage({ type: 'requestLoadPattern' });
     });
   }
   if (scaleSel) {
@@ -895,15 +1295,29 @@
       render();
     });
   }
+  if (swingEnableChk) {
+    swingEnableChk.addEventListener('change', () => {
+      swingEnabled = !!swingEnableChk.checked;
+      clearAllSwingFires();
+      persist();
+      render();
+    });
+  }
 
   window.addEventListener('message', (event) => {
     const msg = event.data;
-    if (!msg || msg.type !== 'targets') return;
-    targets = msg.targets || [];
-    gateOptions = msg.gates || [];
-    syncPreferredTracks();
-    render();
-    resyncRunning();
+    if (!msg || !msg.type) return;
+    if (msg.type === 'targets') {
+      targets = msg.targets || [];
+      gateOptions = msg.gates || [];
+      syncPreferredTracks();
+      render();
+      resyncRunning(false);
+      return;
+    }
+    if (msg.type === 'patternLoaded' && msg.data) {
+      applyPatternFile(msg.data);
+    }
   });
 
   render();

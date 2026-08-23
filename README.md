@@ -30,13 +30,13 @@ cursor --install-extension chuck-live-0.1.0.vsix
 3. Open a patch → **ChucK Session** → **Start VM** (Control). **Knobs** stay under **ChucK Live**.
 4. **Add Current File** (`Ctrl+Shift+.`) — shreds appear in **Shreds**. Drag to reorder (list + rack).
 5. **Open Rack** / **Open Sequencer** from the Shreds toolbar; **Meter** sits under Shreds.
-6. **Reload Shred** (`Ctrl+.`) or the inline sync icon on a shred to hot-swap — also via editor title / CodeLens **Reload**.
+6. **Reload Shred** (`Ctrl+.`) — or the editor **Run** play button / **Load** CodeLens above the first line.
 
 Tip: drag the **ChucK Session** activity icon to the Secondary Side Bar for a right-hand panel (Cursor does not allow extensions to pin views there directly).
 
 ### Mixable oscillators (`examples/oscillators/`)
 
-Load **`master.ck` first**, then instruments/drums, then **`out/dac-out.ck` or `fx/bus-fx.ck`**. Add **`out/record-out.ck` anytime** to capture WAV (tap-only; safe mid-session). Details: [examples/README.md](examples/README.md).
+Load **`master.ck` first**, then instruments/drums, then **`out/dac-out.ck` or `fx/bus-fx.ck`**. Add **`out/record-out.ck` anytime** to capture WAV (tap-only; safe mid-session). **Add / Reload** warns if a bus module is missing master or a second speaker shred would double-`dac` (Cancel or Add anyway). Details: [examples/README.md](examples/README.md).
 
 Cyberpunk bus recipe: [examples/cyberpunk/README.md](examples/cyberpunk/README.md). Standalone: `demo.ck`, `cyberpunk.ck` (direct `dac`).
 
@@ -111,7 +111,7 @@ bin/chuck-pw --probe
 - Add Current File / Reload Shred / Remove Shred / Remove All — inline actions on the Shreds list, CodeLens **Load** / **Reload**, editor title icons
 - Refresh Status / Refresh Knobs
 - **Open Rack** — full-page Eurorack modules for loaded shreds
-- **Open Sequencer** — 16-step grid bound to any `@knob`/`@seq` float (e.g. `sine_freq`, `mb_noteHz`)
+- **Open Sequencer** — 16-step cascade (`@knob`/`@seq`/`@seqGate`): A/B banks, optional swing (header toggle, off by default), step probability (Shift+drag gate), mute/solo, **Save As… / Load…** → `.chuck-live/patterns/<name>.json`
 - **Init Project Library** — copy the bundled module library into your workspace (`chuck/` by default) and deploy AI guides (`AGENTS.md`, Cursor rule, Copilot instructions)
 - **Re-init Project Library (force)** — replace an existing library and refresh AI guides (full preset wipes the library folder first)
 - **Meter** (ChucK Session) — L/R peak VU bars; auto-loaded with Start VM

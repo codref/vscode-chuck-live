@@ -46,7 +46,8 @@
           "other": true,
           "comments": true,
           "strings": false
-        }
+        },
+        "editor.codeLens": true
       }
     },
     "commands": [
@@ -63,12 +64,20 @@
       {
         "command": "chuckLive.addShred",
         "title": "ChucK: Add Current File",
+        "shortTitle": "Load",
         "icon": "$(add)"
       },
       {
         "command": "chuckLive.replaceShred",
         "title": "ChucK: Reload Shred",
+        "shortTitle": "Reload",
         "icon": "$(sync)"
+      },
+      {
+        "command": "chuckLive.runShred",
+        "title": "ChucK: Load / Reload",
+        "shortTitle": "Load",
+        "icon": "$(run)"
       },
       {
         "command": "chuckLive.removeShred",
@@ -240,6 +249,13 @@
           "command": "chuckLive.removeShred",
           "when": "view == chuckLive.sessionShreds && viewItem == chuckManagedShred",
           "group": "inline@1"
+        }
+      ],
+      "editor/title/run": [
+        {
+          "command": "chuckLive.runShred",
+          "when": "resourceLangId == chuck",
+          "group": "navigation@1"
         }
       ],
       "editor/title": [

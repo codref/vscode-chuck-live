@@ -15,4 +15,4 @@ Modular stack (not the standalone [`../cyberpunk.ck`](../cyberpunk.ck)).
 
 - Pull `master_amp` down when many modules run  
 - `fx_mix` ~0.2; raise crush slowly  
-- Hat/snare/kick are separate `@seqGate` tracks — mute by Stop on that track  
+- Hat/snare/kick are separate `@seqGate` tracks — use **M** to mute (or Stop) per track  

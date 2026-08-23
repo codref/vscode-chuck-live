@@ -116,7 +116,11 @@ global Event dk_kick;
 - **Sync clocks** + Master BPM = shared 16ths  
 - **Scale** snaps MIDI tracks (default phrygian)  
 - Gate tracks: pads only (drums)
-- **A/B banks** per track: **Dup→standby** copies the live bank; edit the other tab while A plays; **Queue** swaps at the end of the 16-step cycle; **Swap now** switches immediately
+- **A/B banks** per track: **Dup→standby** copies the live bank; edit the other tab while A plays; **Queue** swaps at the end of the 16-step cycle; **Swap now** switches immediately  
+- **Swing** per track (0–100%); odd steps late — header **Swing** must be on (off by default)  
+- **Probability**: Shift+drag a gate pad (opacity shows chance)  
+- **M / S**: mute or solo without stopping the clock (unlike Stop)  
+- **Save As… / Load…**: named JSON under `.chuck-live/patterns/`
 
 ## Not yet
 
