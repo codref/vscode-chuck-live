@@ -1,6 +1,9 @@
 // drums/kick.ck — analog-ish kick into rackBus. Load master first; sequence dk_kick.
 
 global Gain rackBus;
+global Gain kick_meter;
+global float kick_meter_p;
+0.0 => kick_meter_p;
 
 // @seqGate
 global Event dk_kick;
@@ -16,8 +19,9 @@ global float dk_kick_dec;
 75.0 => dk_kick_freq;
 220.0 => dk_kick_dec;
 
-SinOsc osc => ADSR env => Gain g => rackBus;
-Noise click => BPF clickF => Gain clickG => rackBus;
+SinOsc osc => ADSR env => Gain g => kick_meter;
+Noise click => BPF clickF => Gain clickG => kick_meter;
+kick_meter => rackBus;
 
 env.set(1::ms, 220::ms, 0.0, 30::ms);
 clickF.set(800, 1.5);
@@ -27,7 +31,17 @@ clickF.set(800, 1.5);
 
 spork ~ onKick();
 spork ~ follow();
+spork ~ _ckLivePeak();
 while (true) 20::ms => now;
+
+fun void _ckLivePeak() {
+  Math.pow(0.001, 1.0 / (0.05 * 44100.0)) => float d;
+  while (true) {
+    Math.fabs(kick_meter.last()) => float s;
+    if (s > kick_meter_p) s => kick_meter_p; else kick_meter_p * d => kick_meter_p;
+    1::samp => now;
+  }
+}
 
 fun void follow() {
   while (true) {

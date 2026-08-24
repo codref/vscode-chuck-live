@@ -1,6 +1,9 @@
 // oscillators/fm.ck — 2-op FM into rackBus (load master.ck first).
 
 global Gain rackBus;
+global Gain fm_meter;
+global float fm_meter_p;
+0.0 => fm_meter_p;
 
 // @knob min=0 max=0.5 step=0.01 default=0.15
 global float fm_amp;
@@ -24,12 +27,22 @@ global float fm_fb;
 0.2 => fm_fb;
 
 SinOsc mod => blackhole;
-SinOsc car => rackBus;
+SinOsc car => fm_meter => rackBus;
 0.0 => car.gain;
 0.0 => mod.gain;
 
 spork ~ follow();
+spork ~ _ckLivePeak();
 while (true) 20::ms => now;
+
+fun void _ckLivePeak() {
+  Math.pow(0.001, 1.0 / (0.05 * 44100.0)) => float d;
+  while (true) {
+    Math.fabs(fm_meter.last()) => float s;
+    if (s > fm_meter_p) s => fm_meter_p; else fm_meter_p * d => fm_meter_p;
+    1::samp => now;
+  }
+}
 
 fun void follow() {
   while (true) {

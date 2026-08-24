@@ -1,6 +1,9 @@
 // drums/snare.ck — snare/clap-ish into rackBus. Load master first; sequence dk_snare.
 
 global Gain rackBus;
+global Gain snare_meter;
+global float snare_meter_p;
+0.0 => snare_meter_p;
 
 // @seqGate
 global Event dk_snare;
@@ -18,7 +21,7 @@ global float dk_snare_tone;
 
 Noise nz => BPF bp => ADSR envN => Gain mix;
 SinOsc body => ADSR envB => mix;
-mix => Gain g => rackBus;
+mix => Gain g => snare_meter => rackBus;
 
 envN.set(1::ms, 120::ms, 0.0, 40::ms);
 envB.set(1::ms, 60::ms, 0.0, 30::ms);
@@ -29,7 +32,17 @@ envB.set(1::ms, 60::ms, 0.0, 30::ms);
 
 spork ~ onSnare();
 spork ~ follow();
+spork ~ _ckLivePeak();
 while (true) 20::ms => now;
+
+fun void _ckLivePeak() {
+  Math.pow(0.001, 1.0 / (0.05 * 44100.0)) => float d;
+  while (true) {
+    Math.fabs(snare_meter.last()) => float s;
+    if (s > snare_meter_p) s => snare_meter_p; else snare_meter_p * d => snare_meter_p;
+    1::samp => now;
+  }
+}
 
 fun void follow() {
   while (true) {

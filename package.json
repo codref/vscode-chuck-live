@@ -2,7 +2,7 @@
   "name": "chuck-live",
   "displayName": "ChucK Live",
   "description": "Live coding for ChucK: VM control, shred load/unload, and annotated knobs over OSC",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "publisher": "chuck-live",
   "engines": {
     "vscode": "^1.85.0"
@@ -15,8 +15,7 @@
     "onLanguage:chuck",
     "onView:chuckLive.control",
     "onView:chuckLive.sessionShreds",
-    "onView:chuckLive.knobs",
-    "onView:chuckLive.sessionMeter"
+    "onView:chuckLive.knobs"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -120,7 +119,7 @@
       },
       {
         "command": "chuckLive.showSession",
-        "title": "ChucK: Show Session (Shreds + Meter)",
+        "title": "ChucK: Show Session (Shreds)",
         "icon": "$(list-unordered)"
       }
     ],
@@ -168,11 +167,6 @@
         {
           "id": "chuckLive.sessionShreds",
           "name": "Shreds"
-        },
-        {
-          "type": "webview",
-          "id": "chuckLive.sessionMeter",
-          "name": "Meter"
         }
       ]
     },

@@ -2,6 +2,9 @@
 // Load AFTER master.ck instead of out/dac-out.ck (not both).
 
 global Gain mainBus;
+global Gain bus_fx_meter;
+global float bus_fx_meter_p;
+0.0 => bus_fx_meter_p;
 
 // @knob min=0 max=1 step=0.01 default=0.22
 global float fx_mix;
@@ -20,7 +23,7 @@ global float fx_crush;
 0.18 => fx_reverb;
 0.15 => fx_crush;
 
-mainBus => Gain dry => Gain sum => dac;
+mainBus => Gain dry => Gain sum => bus_fx_meter => dac;
 mainBus => Gain intoWet => Echo echo => NRev rev => Gain crushG => Gain wet => sum;
 
 1.0 => dry.gain;
@@ -33,7 +36,17 @@ mainBus => Gain intoWet => Echo echo => NRev rev => Gain crushG => Gain wet => s
 0.12 => rev.mix;
 
 spork ~ follow();
+spork ~ _ckLivePeak();
 while (true) 20::ms => now;
+
+fun void _ckLivePeak() {
+  Math.pow(0.001, 1.0 / (0.05 * 44100.0)) => float d;
+  while (true) {
+    Math.fabs(bus_fx_meter.last()) => float s;
+    if (s > bus_fx_meter_p) s => bus_fx_meter_p; else bus_fx_meter_p * d => bus_fx_meter_p;
+    1::samp => now;
+  }
+}
 
 fun void follow() {
   while (true) {

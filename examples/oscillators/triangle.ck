@@ -1,6 +1,9 @@
 // oscillators/triangle.ck — soft triangle into rackBus (load master.ck first).
 
 global Gain rackBus;
+global Gain triangle_meter;
+global float triangle_meter_p;
+0.0 => triangle_meter_p;
 
 // @knob min=0 max=0.7 step=0.01 default=0.18
 global float tri_amp;
@@ -23,7 +26,7 @@ global float tri_chorus;
 0.0 => tri_fifth;
 0.0 => tri_chorus;
 
-TriOsc osc => Gain g => rackBus;
+TriOsc osc => Gain g => triangle_meter => rackBus;
 TriOsc sub => g;
 TriOsc fifth => g;
 TriOsc ch => g;
@@ -33,7 +36,17 @@ TriOsc ch => g;
 0.0 => ch.gain;
 
 spork ~ follow();
+spork ~ _ckLivePeak();
 while (true) 20::ms => now;
+
+fun void _ckLivePeak() {
+  Math.pow(0.001, 1.0 / (0.05 * 44100.0)) => float d;
+  while (true) {
+    Math.fabs(triangle_meter.last()) => float s;
+    if (s > triangle_meter_p) s => triangle_meter_p; else triangle_meter_p * d => triangle_meter_p;
+    1::samp => now;
+  }
+}
 
 fun void follow() {
   while (true) {

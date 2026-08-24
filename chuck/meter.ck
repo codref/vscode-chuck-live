@@ -1,8 +1,14 @@
-// Reference stub — ChucK Live regenerates a temp meter.ck on Start VM.
-// Taps dac L/R peaks and sends OSC /chuck/vu (two floats) to the extension.
+// Reference stub — ChucK Live regenerates a temp meter.ck on Start VM
+// and whenever the shred list changes.
+//
+// Master VU: dac L/R peaks → first two floats of OSC /chuck/vu
+// Module LEDs: each non-master file should declare
+//   global Gain <basename>_meter;
+//   global float <basename>_meter_p;
+// patch through the Gain, and spork a peak tracker into the float.
+// Extra /chuck/vu floats are those peak values, same order as rack modules.
 //
 // Default meter port: 9001 (setting chuckLive.meterPort)
-// Address: /chuck/vu ,ff
 
 0.0 => float peakL;
 0.0 => float peakR;

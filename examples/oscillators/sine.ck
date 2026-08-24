@@ -1,6 +1,9 @@
 // oscillators/sine.ck — pure sine into rackBus (load master.ck first).
 
 global Gain rackBus;
+global Gain sine_meter;
+global float sine_meter_p;
+0.0 => sine_meter_p;
 
 // @knob min=0 max=0.8 step=0.01 default=0.2
 global float sine_amp;
@@ -29,12 +32,23 @@ global float sine_pan;
 0.0 => sine_pan;
 
 SinOsc osc => Pan2 pan;
-pan.chan(0) => rackBus;
-pan.chan(1) => rackBus;
+pan.chan(0) => sine_meter;
+pan.chan(1) => sine_meter;
+sine_meter => rackBus;
 0.0 => osc.gain;
 
 spork ~ follow();
+spork ~ _ckLivePeak();
 while (true) 20::ms => now;
+
+fun void _ckLivePeak() {
+  Math.pow(0.001, 1.0 / (0.05 * 44100.0)) => float d;
+  while (true) {
+    Math.fabs(sine_meter.last()) => float s;
+    if (s > sine_meter_p) s => sine_meter_p; else sine_meter_p * d => sine_meter_p;
+    1::samp => now;
+  }
+}
 
 fun void follow() {
   while (true) {

@@ -6,14 +6,29 @@
   const ANGLE_MIN = -135;
   const ANGLE_MAX = 135;
 
+  const DB_MIN = -60;
+  const LED_ON_DB = -48;
+  const LED_HOT_DB = -6;
+  const LED_CLIP_DB = -0.1;
+  const LED_HOLD_MS = 450;
+
+  const ledHoldUntil = {};
+
   window.addEventListener('message', (event) => {
     const msg = event.data;
     if (msg.type === 'setRack') {
       render(msg.modules || []);
+    } else if (msg.type === 'vu') {
+      paintMasterVu(Number(msg.l) || 0, Number(msg.r) || 0);
+    } else if (msg.type === 'peaks') {
+      paintPeaks(msg.peaks || {});
+    } else if (msg.type === 'resetMeter') {
+      resetMeterUi();
     }
   });
 
   vscode.postMessage({ type: 'ready' });
+  requestAnimationFrame(meterTick);
 
   function render(modules) {
     if (!caseEl) return;
@@ -37,6 +52,7 @@
   function makeModule(mod) {
     const el = document.createElement('div');
     el.className = 'module' + (mod.isMaster ? ' master' : '');
+    el.dataset.shredId = String(mod.id);
 
     const accent = document.createElement('div');
     accent.className = 'mod-accent';
@@ -77,9 +93,172 @@
     }
 
     el.appendChild(accent);
+    if (!mod.isMaster) {
+      const led = document.createElement('div');
+      led.className = 'mod-peak-led';
+      led.title = 'Peak';
+      accent.appendChild(led);
+    }
     el.appendChild(head);
     el.appendChild(controls);
+    if (mod.isMaster) {
+      el.appendChild(makeMasterMeter());
+    }
     return el;
+  }
+
+  function makeMasterMeter() {
+    const wrap = document.createElement('div');
+    wrap.className = 'mod-meter';
+    wrap.innerHTML =
+      '<div class="mod-meter-title">VU</div>' +
+      channelHtml('L') +
+      channelHtml('R');
+    return wrap;
+  }
+
+  function channelHtml(ch) {
+    const side = ch === 'L' ? 'L' : 'R';
+    return (
+      '<div class="mod-meter-ch">' +
+      '<span class="mod-meter-label">' +
+      side +
+      '</span>' +
+      '<div class="mod-meter-bar-wrap">' +
+      '<div class="mod-meter-bar" data-bar="' +
+      side +
+      '"></div>' +
+      '<div class="mod-meter-hold" data-hold="' +
+      side +
+      '"></div>' +
+      '</div>' +
+      '<div class="mod-meter-led" data-led="' +
+      side +
+      '" title="Peak"></div>' +
+      '</div>'
+    );
+  }
+
+  const masterHold = { L: DB_MIN, R: DB_MIN, atL: 0, atR: 0 };
+
+  function paintMasterVu(linL, linR) {
+    const meter = caseEl && caseEl.querySelector('.module.master .mod-meter');
+    if (!meter) return;
+    const now = performance.now();
+    const lDb = linToDb(linL);
+    const rDb = linToDb(linR);
+    if (lDb >= masterHold.L) {
+      masterHold.L = lDb;
+      masterHold.atL = now;
+    }
+    if (rDb >= masterHold.R) {
+      masterHold.R = rDb;
+      masterHold.atR = now;
+    }
+    paintMasterCh(meter, 'L', lDb, decayHold(masterHold.L, masterHold.atL, now));
+    paintMasterCh(meter, 'R', rDb, decayHold(masterHold.R, masterHold.atR, now));
+  }
+
+  function decayHold(hold, holdAt, now) {
+    if (now - holdAt < 1200) return hold;
+    return Math.max(DB_MIN, hold - 0.4);
+  }
+
+  function paintMasterCh(meter, side, level, hold) {
+    const bar = meter.querySelector('[data-bar="' + side + '"]');
+    const holdEl = meter.querySelector('[data-hold="' + side + '"]');
+    const led = meter.querySelector('[data-led="' + side + '"]');
+    if (!bar || !holdEl || !led) return;
+    bar.style.width = dbToPct(level) + '%';
+    holdEl.style.left = dbToPct(hold) + '%';
+    holdEl.classList.toggle('on', hold > DB_MIN + 0.5);
+    holdEl.classList.toggle('clip', hold >= LED_CLIP_DB);
+    const clip = level >= LED_CLIP_DB || hold >= LED_CLIP_DB;
+    led.classList.toggle('on', hold >= LED_HOT_DB && !clip);
+    led.classList.toggle('clip', clip);
+    bar.classList.toggle('clip', level >= LED_CLIP_DB);
+  }
+
+  function resetMeterUi() {
+    for (const k of Object.keys(ledHoldUntil)) {
+      delete ledHoldUntil[k];
+    }
+    masterHold.L = DB_MIN;
+    masterHold.R = DB_MIN;
+    paintMasterVu(0, 0);
+    if (!caseEl) return;
+    for (const el of caseEl.querySelectorAll('.module')) {
+      el.classList.remove('peaking', 'clipping');
+    }
+    for (const led of caseEl.querySelectorAll('.mod-peak-led, .mod-meter-led')) {
+      led.classList.remove('on', 'hot', 'clip');
+      led.style.opacity = '';
+    }
+    for (const bar of caseEl.querySelectorAll('.mod-meter-bar')) {
+      bar.style.width = '0%';
+      bar.classList.remove('clip');
+    }
+    for (const hold of caseEl.querySelectorAll('.mod-meter-hold')) {
+      hold.style.left = '0%';
+      hold.classList.remove('on', 'clip');
+    }
+  }
+
+  function meterTick(now) {
+    if (caseEl) {
+      for (const el of caseEl.querySelectorAll('.module:not(.master)')) {
+        const id = el.dataset.shredId;
+        const until = ledHoldUntil[id] || 0;
+        if (until > 0 && until <= now) {
+          ledHoldUntil[id] = 0;
+          el.classList.remove('peaking');
+          const led = el.querySelector('.mod-peak-led');
+          if (led && !led.classList.contains('clip')) {
+            led.classList.remove('on', 'hot');
+            led.style.opacity = '';
+          }
+        }
+      }
+    }
+    requestAnimationFrame(meterTick);
+  }
+
+  function paintPeaks(peaks) {
+    if (!caseEl) return;
+    const now = performance.now();
+    const mods = caseEl.querySelectorAll('.module:not(.master)');
+    for (const el of mods) {
+      const id = el.dataset.shredId;
+      const lin = Number(peaks[id]) || 0;
+      const db = linToDb(lin);
+      if (db >= LED_ON_DB) {
+        ledHoldUntil[id] = now + LED_HOLD_MS;
+      }
+      const holding = (ledHoldUntil[id] || 0) > now;
+      const clip = db >= LED_CLIP_DB;
+      const on = holding || db >= LED_ON_DB;
+      const hot = db >= LED_HOT_DB;
+      el.classList.toggle('peaking', on && !clip);
+      el.classList.toggle('clipping', clip);
+      const led = el.querySelector('.mod-peak-led');
+      if (!led) continue;
+      led.classList.toggle('on', on && !hot && !clip);
+      led.classList.toggle('hot', hot && !clip);
+      led.classList.toggle('clip', clip);
+      const t = Math.max(0, Math.min(1, (db - LED_ON_DB) / (0 - LED_ON_DB)));
+      led.style.opacity = on || clip ? String(0.4 + t * 0.6) : '';
+    }
+  }
+
+  function linToDb(lin) {
+    if (!(lin > 0)) return DB_MIN;
+    const db = 20 * Math.log10(lin);
+    return Math.max(DB_MIN, Math.min(6, db));
+  }
+
+  function dbToPct(db) {
+    const t = (db - DB_MIN) / (0 - DB_MIN);
+    return Math.max(0, Math.min(100, t * 100));
   }
 
   function stripExt(name) {

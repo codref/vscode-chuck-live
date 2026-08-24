@@ -1,6 +1,9 @@
 // drums/hat.ck — noise hat into rackBus. Load master first; sequence dk_hat.
 
 global Gain rackBus;
+global Gain hat_meter;
+global float hat_meter_p;
+0.0 => hat_meter_p;
 
 // @seqGate
 global Event dk_hat;
@@ -16,7 +19,7 @@ global float dk_hat_color;
 25.0 => dk_hat_dec;
 7000.0 => dk_hat_color;
 
-Noise n => HPF hp => ADSR env => Gain g => rackBus;
+Noise n => HPF hp => ADSR env => Gain g => hat_meter => rackBus;
 env.set(1::ms, 25::ms, 0.0, 15::ms);
 7000 => hp.freq;
 1.0 => n.gain;
@@ -24,7 +27,17 @@ env.set(1::ms, 25::ms, 0.0, 15::ms);
 
 spork ~ onHat();
 spork ~ follow();
+spork ~ _ckLivePeak();
 while (true) 20::ms => now;
+
+fun void _ckLivePeak() {
+  Math.pow(0.001, 1.0 / (0.05 * 44100.0)) => float d;
+  while (true) {
+    Math.fabs(hat_meter.last()) => float s;
+    if (s > hat_meter_p) s => hat_meter_p; else hat_meter_p * d => hat_meter_p;
+    1::samp => now;
+  }
+}
 
 fun void follow() {
   while (true) {

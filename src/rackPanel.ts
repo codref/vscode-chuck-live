@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { getConfig } from './config';
 import { OscClient } from './oscClient';
+import { OscServer, OscMessage } from './oscServer';
 import { ShredOps } from './shredOps';
 import { buildModulesFromShreds, RackModule } from './rackModel';
 import { writeBridgeFile } from './bridgeGen';
@@ -9,20 +10,28 @@ import { collectAnnotations } from './knobsPanel';
 /**
  * Full-page Eurorack-style case: one faceplate per loaded shred.
  * Knobs/buttons send OSC like the sidebar knobs panel.
+ * Master module shows L/R VU; other modules show a peak LED.
  */
 export class RackPanel {
   private panel: vscode.WebviewPanel | undefined;
   private modules: RackModule[] = [];
+  /** Shred ids matching /chuck/peaks float order from the meter shred. */
+  private peakIds: number[] = [];
+  private readonly onOsc: (msg: OscMessage) => void;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly osc: OscClient,
     private readonly shredOps: ShredOps,
+    private readonly oscServer: OscServer,
     private readonly onBridgeNeeded: (
       bridgePath: string,
       source?: string
     ) => Promise<boolean | void>
-  ) {}
+  ) {
+    this.onOsc = (msg: OscMessage) => this.forwardMeter(msg);
+    this.oscServer.on('message', this.onOsc);
+  }
 
   open(): void {
     if (this.panel) {
@@ -55,6 +64,17 @@ export class RackPanel {
     return !!this.panel;
   }
 
+  /** Align peak OSC float indices with shred ids (from meterGen tap order). */
+  setPeakIds(ids: number[]): void {
+    this.peakIds = ids.slice();
+  }
+
+  /** Clear VU / LEDs when VM stops. */
+  resetMeter(): void {
+    this.peakIds = [];
+    this.panel?.webview.postMessage({ type: 'resetMeter' });
+  }
+
   async refresh(reloadBridge = false): Promise<void> {
     this.modules = buildModulesFromShreds(this.shredOps);
     this.panel?.webview.postMessage({
@@ -75,8 +95,33 @@ export class RackPanel {
   }
 
   dispose(): void {
+    this.oscServer.off('message', this.onOsc);
     this.panel?.dispose();
     this.panel = undefined;
+  }
+
+  private forwardMeter(msg: OscMessage): void {
+    if (!this.panel) {
+      return;
+    }
+    if (msg.address !== '/chuck/vu' || msg.floats.length < 2) {
+      return;
+    }
+    this.panel.webview.postMessage({
+      type: 'vu',
+      l: msg.floats[0],
+      r: msg.floats[1],
+    });
+    if (this.peakIds.length === 0) {
+      return;
+    }
+    const peaks: Record<string, number> = {};
+    const extra = msg.floats.slice(2);
+    const n = Math.min(extra.length, this.peakIds.length);
+    for (let i = 0; i < n; i++) {
+      peaks[String(this.peakIds[i])] = extra[i];
+    }
+    this.panel.webview.postMessage({ type: 'peaks', peaks });
   }
 
   private onMessage(msg: {

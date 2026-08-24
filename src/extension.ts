@@ -14,10 +14,10 @@ import {
 import { StatusBar } from './statusBar';
 import { KnobsPanelProvider, collectAnnotations } from './knobsPanel';
 import { writeBridgeFile } from './bridgeGen';
-import { writeMeterFile } from './meterGen';
+import { writeMeterFile, meterTapName, MeterTap } from './meterGen';
+import { buildModulesFromShreds } from './rackModel';
 import { RackPanel } from './rackPanel';
 import { SeqPanel } from './seqPanel';
-import { MeterPanelProvider } from './meterPanel';
 import { runInitProjectCommand } from './projectInit';
 import { AnnotationCompletionProvider } from './annotationComplete';
 import { ControlTreeProvider } from './controlView';
@@ -72,8 +72,41 @@ export function activate(context: vscode.ExtensionContext): void {
     context.extensionUri,
     osc,
     shredOps,
+    oscServer,
     loadBridge
   );
+
+  const reloadMeter = async (): Promise<void> => {
+    if (!vm.running) {
+      return;
+    }
+    const { meterPort } = getConfig();
+    const modules = buildModulesFromShreds(shredOps);
+    const taps: MeterTap[] = modules
+      .filter((m) => !m.isMaster)
+      .map((m) => ({
+        shredId: m.id,
+        name: meterTapName(m.file || m.title),
+      }));
+    const meterFile = writeMeterFile(meterPort, taps);
+    try {
+      await shredOps.loadMeter(meterFile.path, meterFile.source);
+      rack.setPeakIds(taps.map((t) => t.shredId));
+    } catch (err) {
+      vm.output.appendLine(`[warn] meter load: ${err}`);
+    }
+  };
+
+  let meterReloadTimer: ReturnType<typeof setTimeout> | undefined;
+  const reloadMeterSoon = (): void => {
+    if (meterReloadTimer !== undefined) {
+      clearTimeout(meterReloadTimer);
+    }
+    meterReloadTimer = setTimeout(() => {
+      meterReloadTimer = undefined;
+      void reloadMeter();
+    }, 80);
+  };
 
   const seq = new SeqPanel(
     context.extensionUri,
@@ -82,8 +115,6 @@ export function activate(context: vscode.ExtensionContext): void {
     loadBridge
   );
 
-  const meter = new MeterPanelProvider(context.extensionUri, oscServer);
-
   context.subscriptions.push(
     vm,
     osc,
@@ -91,7 +122,6 @@ export function activate(context: vscode.ExtensionContext): void {
     statusBar,
     { dispose: () => rack.dispose() },
     { dispose: () => seq.dispose() },
-    { dispose: () => meter.dispose() },
     vscode.window.createTreeView('chuckLive.sessionShreds', {
       treeDataProvider: tree,
       dragAndDropController: shredDnd,
@@ -99,7 +129,6 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.window.registerTreeDataProvider('chuckLive.control', control),
     vscode.window.registerWebviewViewProvider(KnobsPanelProvider.viewType, knobs),
-    vscode.window.registerWebviewViewProvider(MeterPanelProvider.viewType, meter),
     vscode.languages.registerCompletionItemProvider(
       { language: 'chuck' },
       new AnnotationCompletionProvider(),
@@ -114,7 +143,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vm.onStatusChange((on) => {
       if (!on) {
         shredOps.clearLocal();
-        meter.reset();
+        rack.resetMeter();
       }
       control.refresh();
       if (rack.isOpen) {
@@ -125,6 +154,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (rack.isOpen) {
         void rack.refresh(false);
       }
+      void reloadMeterSoon();
       // Do NOT call seq.ensureBridge here — loadBridge fires onDidChange and loops.
     })
   );
@@ -155,9 +185,8 @@ export function activate(context: vscode.ExtensionContext): void {
         vm.output.appendLine(`[warn] bridge load: ${err}`);
       }
 
-      const meterFile = writeMeterFile(meterPort);
       try {
-        await shredOps.loadMeter(meterFile.path, meterFile.source);
+        await reloadMeter();
         vm.output.appendLine('[ok] meter loaded');
       } catch (err) {
         vscode.window.showWarningMessage(`Meter load: ${err}`);
@@ -177,7 +206,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
     cmd('chuckLive.stopVm', async () => {
       await vm.stop();
-      meter.reset();
+      rack.resetMeter();
       vscode.window.showInformationMessage('ChucK VM stopped');
     }),
 
@@ -301,7 +330,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (seq.isOpen) {
           void seq.ensureBridge().then(() => seq.pushTargets());
         }
-        meter.reset();
+        rack.resetMeter();
       } catch (err) {
         vscode.window.showErrorMessage(String(err));
       }

@@ -1,6 +1,9 @@
 // oscillators/noise.ck — filtered noise into rackBus (load master.ck first).
 
 global Gain rackBus;
+global Gain noise_meter;
+global float noise_meter_p;
+0.0 => noise_meter_p;
 
 // @knob min=0 max=0.4 step=0.01 default=0.08
 global float nz_amp;
@@ -23,13 +26,23 @@ global float nz_gateHz;
 0.0 => nz_hp;
 0.0 => nz_gateHz;
 
-Noise n => HPF hp => BPF bp => Gain g => rackBus;
+Noise n => HPF hp => BPF bp => Gain g => noise_meter => rackBus;
 0.0 => n.gain;
 80.0 => hp.freq;
 1.0 => g.gain;
 
 spork ~ follow();
+spork ~ _ckLivePeak();
 while (true) 20::ms => now;
+
+fun void _ckLivePeak() {
+  Math.pow(0.001, 1.0 / (0.05 * 44100.0)) => float d;
+  while (true) {
+    Math.fabs(noise_meter.last()) => float s;
+    if (s > noise_meter_p) s => noise_meter_p; else noise_meter_p * d => noise_meter_p;
+    1::samp => now;
+  }
+}
 
 fun void follow() {
   while (true) {

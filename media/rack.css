@@ -109,10 +109,23 @@ body {
 }
 
 .module.master {
-  flex-basis: 196px;
-  min-width: 196px;
+  flex-basis: 220px;
+  min-width: 220px;
+  max-width: 240px;
   background: linear-gradient(180deg, #3a424c 0%, var(--face-master) 14%, #2a3038 100%);
   border-color: #1e252c;
+}
+
+.module.peaking {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 0 10px rgba(224, 176, 64, 0.35);
+}
+
+.module.clipping {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 0 12px rgba(229, 85, 85, 0.5);
 }
 
 .module::before,
@@ -137,7 +150,7 @@ body {
 .mod-head {
   text-align: center;
   margin: 4px 0 10px;
-  padding: 0 10px;
+  padding: 0 14px;
   flex-shrink: 0;
 }
 
@@ -159,11 +172,41 @@ body {
 }
 
 .mod-accent {
-  height: 3px;
+  height: 8px;
   margin: 0 4px 8px;
   border-radius: 1px;
   opacity: 0.9;
   flex-shrink: 0;
+  position: relative;
+}
+
+.mod-peak-led {
+  position: absolute;
+  top: 50%;
+  right: 3px;
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: #1a1c1e;
+  box-shadow: inset 0 0 2px rgba(0, 0, 0, 0.7);
+  z-index: 2;
+  transition: background 50ms linear, box-shadow 50ms linear, opacity 50ms linear;
+}
+
+.mod-peak-led.on {
+  background: #6c8;
+  box-shadow: 0 0 6px rgba(80, 200, 120, 0.85);
+}
+
+.mod-peak-led.hot {
+  background: #e0b040;
+  box-shadow: 0 0 7px rgba(224, 176, 64, 0.95);
+}
+
+.mod-peak-led.clip {
+  background: #e55;
+  box-shadow: 0 0 8px rgba(229, 85, 85, 0.95);
 }
 
 .controls {
@@ -274,4 +317,100 @@ button.bang {
 
 button.bang:active {
   transform: scale(0.95);
+}
+
+.mod-meter {
+  flex-shrink: 0;
+  margin-top: auto;
+  padding: 8px 4px 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.mod-meter-title {
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-align: center;
+}
+
+.mod-meter-ch {
+  display: grid;
+  grid-template-columns: 12px 1fr 10px;
+  align-items: center;
+  gap: 5px;
+}
+
+.mod-meter-label {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--muted);
+  text-align: center;
+}
+
+.mod-meter-bar-wrap {
+  position: relative;
+  height: 8px;
+  background: #1a1d21;
+  border-radius: 1px;
+  overflow: hidden;
+}
+
+.mod-meter-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0%;
+  background: linear-gradient(
+    to right,
+    #3d9 0%,
+    #3d9 72%,
+    #e0b040 88%,
+    #e55 100%
+  );
+}
+
+.mod-meter-bar.clip {
+  box-shadow: inset -8px 0 8px -3px rgba(229, 85, 85, 0.7);
+}
+
+.mod-meter-hold {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  width: 2px;
+  left: 0%;
+  background: #f2f2f2;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.mod-meter-hold.on {
+  opacity: 1;
+}
+
+.mod-meter-hold.clip {
+  background: #e55;
+}
+
+.mod-meter-led {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3a4048;
+  box-shadow: inset 0 0 2px rgba(0, 0, 0, 0.5);
+}
+
+.mod-meter-led.on {
+  background: #e0b040;
+  box-shadow: 0 0 6px rgba(224, 176, 64, 0.9);
+}
+
+.mod-meter-led.clip {
+  background: #e55;
+  box-shadow: 0 0 7px rgba(229, 85, 85, 0.95);
 }

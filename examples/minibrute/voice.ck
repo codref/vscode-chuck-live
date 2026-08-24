@@ -3,6 +3,9 @@
 // Sequencer: bind mb_noteHz (midi) + gate mb_gate.
 
 global Gain rackBus;
+global Gain voice_meter;
+global float voice_meter_p;
+0.0 => voice_meter_p;
 
 // @seq mode=midi min=24 max=84 step=1 default=48 gate=mb_gate
 global float mb_noteHz;
@@ -72,7 +75,7 @@ Noise nz => mix;
 SawOsc sub => mix;
 0.5 => sqr.width;
 
-mix => Gain fold => LPF flt => ADSR env => Gain drive => Gain out => rackBus;
+mix => Gain fold => LPF flt => ADSR env => Gain drive => Gain out => voice_meter => rackBus;
 env.set(5::ms, 120::ms, 0.55, 200::ms);
 0.0 => out.gain;
 1800 => flt.freq;
@@ -80,7 +83,17 @@ env.set(5::ms, 120::ms, 0.55, 200::ms);
 
 spork ~ follow();
 spork ~ onGate();
+spork ~ _ckLivePeak();
 while (true) 20::ms => now;
+
+fun void _ckLivePeak() {
+  Math.pow(0.001, 1.0 / (0.05 * 44100.0)) => float d;
+  while (true) {
+    Math.fabs(voice_meter.last()) => float s;
+    if (s > voice_meter_p) s => voice_meter_p; else voice_meter_p * d => voice_meter_p;
+    1::samp => now;
+  }
+}
 
 fun void follow() {
   while (true) {
