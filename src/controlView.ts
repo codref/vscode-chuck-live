@@ -18,7 +18,10 @@ export class ControlTreeProvider implements vscode.TreeDataProvider<ControlItem>
   >();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
-  constructor(private readonly vm: ChuckVm) {
+  constructor(
+    private readonly vm: ChuckVm,
+    private readonly version: string
+  ) {
     vm.onStatusChange(() => this._onDidChangeTreeData.fire(undefined));
   }
 
@@ -42,11 +45,14 @@ export class ControlTreeProvider implements vscode.TreeDataProvider<ControlItem>
       return [];
     }
     const { otfPort } = getConfig();
+    const version = this.version;
     return [
       {
         id: 'vm',
         label: 'VM running',
-        description: `OTF :${otfPort}`,
+        description: version
+          ? `v${version} · OTF :${otfPort}`
+          : `OTF :${otfPort}`,
         icon: 'play-circle',
       },
     ];

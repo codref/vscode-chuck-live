@@ -2,7 +2,7 @@
   "name": "chuck-live",
   "displayName": "ChucK Live",
   "description": "Live coding for ChucK: VM control, shred load/unload, and annotated knobs over OSC",
-  "version": "0.1.0",
+  "version": "0.3.6",
   "publisher": "chuck-live",
   "engines": {
     "vscode": "^1.85.0"
@@ -330,7 +330,8 @@
   "scripts": {
     "compile": "node ./node_modules/typescript/lib/tsc.js -p ./",
     "watch": "node ./node_modules/typescript/lib/tsc.js -watch -p ./",
-    "package": "node ./node_modules/typescript/lib/tsc.js -p ./ && node scripts/package-vsix.js"
+    "package": "node ./node_modules/typescript/lib/tsc.js -p ./ && node scripts/package-vsix.js",
+    "install-local": "node scripts/install-local.js"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

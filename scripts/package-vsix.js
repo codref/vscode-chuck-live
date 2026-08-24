@@ -7,7 +7,11 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 const root = path.join(__dirname, '..');
-const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+const pkgPath = path.join(root, 'package.json');
+const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+pkg.version = bumpPatch(pkg.version);
+fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+console.log('Version', pkg.version);
 const outName = `${pkg.name}-${pkg.version}.vsix`;
 const staging = path.join(root, '.vsix-staging');
 const extDir = path.join(staging, 'extension');
@@ -104,6 +108,18 @@ with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
 
 fs.rmSync(staging, { recursive: true, force: true });
 console.log('Wrote', vsixPath);
+
+/** 0.1.0 → 0.1.1 (build/patch; major.minor unchanged). */
+function bumpPatch(version) {
+  const parts = String(version).split('.').map((n) => parseInt(n, 10));
+  if (parts.length < 2 || parts.slice(0, 3).some((n) => Number.isNaN(n))) {
+    throw new Error(`Cannot bump version: ${version}`);
+  }
+  const major = parts[0];
+  const minor = parts[1];
+  const patch = (parts[2] ?? 0) + 1;
+  return `${major}.${minor}.${patch}`;
+}
 
 function escapeXml(s) {
   return String(s)

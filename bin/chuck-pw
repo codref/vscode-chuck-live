@@ -1,3 +1,8 @@
 #!/bin/sh
 # PipeWire JACK bridge — required on systems where chuck is built for JACK only.
+# Line-buffer stdio so the editor Output channel shows JACK/OTF messages immediately
+# (fully buffered pipes otherwise hide errors until exit).
+if command -v stdbuf >/dev/null 2>&1; then
+  exec stdbuf -oL -eL pw-jack chuck "$@"
+fi
 exec pw-jack chuck "$@"

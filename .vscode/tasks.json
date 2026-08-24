@@ -23,6 +23,17 @@
       "presentation": {
         "reveal": "silent"
       }
+    },
+    {
+      "label": "install-local",
+      "type": "shell",
+      "command": "node scripts/install-local.js",
+      "group": "none",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
     }
   ]
 }

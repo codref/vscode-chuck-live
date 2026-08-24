@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as vscode from 'vscode';
 import { getConfig } from './config';
-import { ChuckVm, runChuck } from './chuckVm';
+import { ChuckVm, runChuck, otfClientExecutable } from './chuckVm';
 import { resolveChuckPath } from './chuckPaths';
 
 const ORDER_STATE_KEY = 'chuckLive.shredOrder';
@@ -170,10 +170,10 @@ export class ShredOps {
     this.ensureVm();
     const abs = path.resolve(filePath);
     const { executable, otfPort } = getConfig();
-    await runChuck(executable, [`--port:${otfPort}`, '+', abs]);
+    const client = otfClientExecutable(executable);
+    await this.otfAdd(client, otfPort, abs);
     const id = this.nextGuessId++;
     this.remember(id, abs);
-    await this.status();
     return this.byPath.get(abs) ?? id;
   }
 
@@ -185,7 +185,14 @@ export class ShredOps {
       throw new Error('No shred id for this file — Add it first');
     }
     const { executable, otfPort } = getConfig();
-    await runChuck(executable, [`--port:${otfPort}`, '=', String(id), abs]);
+    const client = otfClientExecutable(executable);
+    await runChuck(client, [
+      '--silent',
+      `--port:${otfPort}`,
+      '=',
+      String(id),
+      abs,
+    ]);
     this.remember(id, abs);
     this._onDidChange.fire();
   }
@@ -193,14 +200,21 @@ export class ShredOps {
   async remove(shredId: number): Promise<void> {
     this.ensureVm();
     const { executable, otfPort } = getConfig();
-    await runChuck(executable, [`--port:${otfPort}`, '-', String(shredId)]);
+    const client = otfClientExecutable(executable);
+    await runChuck(client, [
+      '--silent',
+      `--port:${otfPort}`,
+      '-',
+      String(shredId),
+    ]);
     this.forget(shredId);
   }
 
   async removeAll(): Promise<void> {
     this.ensureVm();
     const { executable, otfPort } = getConfig();
-    await runChuck(executable, [`--port:${otfPort}`, 'remove.all']);
+    const client = otfClientExecutable(executable);
+    await runChuck(client, ['--silent', `--port:${otfPort}`, 'remove.all']);
     this.byPath.clear();
     this.shreds.clear();
     this.bridgeId = undefined;
@@ -214,8 +228,9 @@ export class ShredOps {
   async status(): Promise<void> {
     this.ensureVm();
     const { executable, otfPort } = getConfig();
+    const client = otfClientExecutable(executable);
     // Status prints on the *listener* console, not the client.
-    await runChuck(executable, [`--port:${otfPort}`, '^']);
+    await runChuck(client, ['--silent', `--port:${otfPort}`, '^']);
   }
 
   /**
@@ -241,8 +256,10 @@ export class ShredOps {
     }
 
     const { executable, otfPort } = getConfig();
+    const client = otfClientExecutable(executable);
     if (this.bridgeId !== undefined) {
-      await runChuck(executable, [
+      await runChuck(client, [
+        '--silent',
         `--port:${otfPort}`,
         '=',
         String(this.bridgeId),
@@ -250,11 +267,10 @@ export class ShredOps {
       ]);
       this.remember(this.bridgeId, abs, { isBridge: true }, true);
     } else {
-      await runChuck(executable, [`--port:${otfPort}`, '+', abs]);
+      await this.otfAdd(client, otfPort, abs);
       const id = this.nextGuessId++;
       this.bridgeId = id;
       this.remember(id, abs, { isBridge: true }, true);
-      await this.status();
     }
     this.lastBridgeSource = src;
     return true;
@@ -282,8 +298,10 @@ export class ShredOps {
     }
 
     const { executable, otfPort } = getConfig();
+    const client = otfClientExecutable(executable);
     if (this.meterId !== undefined) {
-      await runChuck(executable, [
+      await runChuck(client, [
+        '--silent',
         `--port:${otfPort}`,
         '=',
         String(this.meterId),
@@ -291,11 +309,10 @@ export class ShredOps {
       ]);
       this.remember(this.meterId, abs, { isMeter: true }, true);
     } else {
-      await runChuck(executable, [`--port:${otfPort}`, '+', abs]);
+      await this.otfAdd(client, otfPort, abs);
       const id = this.nextGuessId++;
       this.meterId = id;
       this.remember(id, abs, { isMeter: true }, true);
-      await this.status();
     }
     this.lastMeterSource = src;
     return true;
@@ -407,6 +424,45 @@ export class ShredOps {
       this.meterId === id ||
       !!existing?.isMeter;
     this.remember(id, abs, { isBridge, isMeter });
+  }
+
+  /**
+   * `chuck + file` often exits 0 even when the VM never got the packet.
+   * Confirm via VM log text (not event timing) and retry.
+   */
+  private async otfAdd(
+    client: string,
+    otfPort: number,
+    abs: string
+  ): Promise<void> {
+    const base = path.basename(abs);
+    const args = ['--silent', `--port:${otfPort}`, '+', abs];
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      const mark = this.vm.logMark();
+      this.vm.output.appendLine(`$ ${client} ${args.join(' ')}`);
+      try {
+        const out = await runChuck(client, args, 8000);
+        if (out.trim()) {
+          this.vm.output.appendLine(out.trimEnd());
+        }
+      } catch (err) {
+        this.vm.output.appendLine(`[warn] OTF client: ${err}`);
+      }
+      const ok = await this.vm.waitLogSince(
+        mark,
+        (delta) =>
+          delta.includes('sporking incoming shred') && delta.includes(base),
+        2500
+      );
+      if (ok) {
+        return;
+      }
+      this.vm.output.appendLine(
+        `[warn] OTF add not confirmed (${base}), retry ${attempt}/5`
+      );
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    throw new Error(`OTF add did not reach the VM: ${base}`);
   }
 
   private ensureVm(): void {

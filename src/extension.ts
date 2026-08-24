@@ -25,29 +25,30 @@ import { ShredCodeLensProvider } from './shredLens';
 import { confirmAddGuardrails } from './shredGuardrails';
 
 async function revealSessionViews(): Promise<void> {
-  try {
-    await vscode.commands.executeCommand(
-      'workbench.view.extension.chuckLiveSession'
-    );
-  } catch {
-    /* ignore */
-  }
-  try {
-    await vscode.commands.executeCommand('chuckLive.sessionShreds.focus');
-  } catch {
-    /* ignore */
-  }
+  // Cursor/VS Code can leave these promises pending forever — never block Start on them.
+  const soft = (cmd: string): void => {
+    void Promise.race([
+      vscode.commands.executeCommand(cmd),
+      new Promise<void>((resolve) => setTimeout(resolve, 1200)),
+    ]).catch(() => {
+      /* ignore */
+    });
+  };
+  soft('workbench.view.extension.chuckLiveSession');
+  soft('chuckLive.sessionShreds.focus');
 }
 
 export function activate(context: vscode.ExtensionContext): void {
   setExtensionPath(context.extensionPath);
+  const version = String(context.extension.packageJSON.version ?? '');
   const vm = new ChuckVm();
+  vm.output.appendLine(`[chuck-live] ${version}`);
   const shredOps = new ShredOps(vm, context.workspaceState);
   const osc = new OscClient();
   const oscServer = new OscServer();
-  const statusBar = new StatusBar(vm);
+  const statusBar = new StatusBar(vm, version);
   const tree = new ShredTreeProvider(shredOps);
-  const control = new ControlTreeProvider(vm);
+  const control = new ControlTreeProvider(vm, version);
   const shredDnd = new ShredTreeDragAndDropController(shredOps);
 
   const loadBridge = async (
@@ -148,22 +149,29 @@ export function activate(context: vscode.ExtensionContext): void {
       const bridge = writeBridgeFile(anns, oscPort);
       try {
         await shredOps.loadBridge(bridge.path, bridge.source);
+        vm.output.appendLine('[ok] bridge loaded');
       } catch (err) {
         vscode.window.showWarningMessage(`Bridge load: ${err}`);
+        vm.output.appendLine(`[warn] bridge load: ${err}`);
       }
 
       const meterFile = writeMeterFile(meterPort);
       try {
         await shredOps.loadMeter(meterFile.path, meterFile.source);
+        vm.output.appendLine('[ok] meter loaded');
       } catch (err) {
         vscode.window.showWarningMessage(`Meter load: ${err}`);
+        vm.output.appendLine(`[warn] meter load: ${err}`);
       }
 
-      await knobs.refresh(false);
+      void knobs.refresh(false);
       if (rack.isOpen) {
         void rack.refresh(false);
       }
-      await revealSessionViews();
+      tree.refresh();
+      control.refresh();
+      void revealSessionViews();
+      vm.output.appendLine('[ok] VM start complete');
       vscode.window.showInformationMessage('ChucK VM started');
     }),
 

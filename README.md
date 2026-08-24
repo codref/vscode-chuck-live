@@ -11,15 +11,15 @@ VS Code / Cursor extension for **live coding** with [ChucK](https://chuck.stanfo
 
 ```bash
 cd /home/operatore/git-codref/r-n-d/vscode-chuck-live
-# If npm is available:
-npm install && npm run compile && npm run package
-# Without npm (deps already vendored under node_modules/typescript):
-node node_modules/typescript/lib/tsc.js -p .
-node scripts/package-vsix.js
-
-cursor --install-extension chuck-live-0.1.0.vsix
-# or: code --install-extension chuck-live-0.1.0.vsix
+# Compile, pack, and install into Cursor (or VS Code):
+npm run install-local
+# Without npm:
+node scripts/install-local.js
 ```
+
+From the editor: **Terminal → Run Task… → install-local**, then **Developer: Reload Window**. Each package/install bumps the **build (patch)** version (`0.3.0` → `0.3.1`); the status bar and ChucK output show the running build.
+
+Override the CLI with `CHUCK_LIVE_EDITOR=code` (or `cursor`) if both are on `PATH`.
 
 **Dev host:** open this folder in Cursor/VS Code, press F5 (“Run Extension”).
 
@@ -96,7 +96,7 @@ This build of `chuck` uses **JACK**. On PipeWire systems the extension ships `bi
 
 ```sh
 #!/bin/sh
-exec pw-jack chuck "$@"
+exec stdbuf -oL -eL pw-jack chuck "$@"
 ```
 
 Start the VM after PipeWire is running. Verify with:
