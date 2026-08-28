@@ -1,4 +1,6 @@
-// oscillators/triangle.ck — soft triangle into rackBus (load master.ck first).
+// oscillators/triangle.ck — soft triangle stack into rackBus (load master.ck first).
+//
+// Four TriOsc shreds into one Gain — sub octave, fifth, and chorus detune layers.
 
 global Gain rackBus;
 global Gain triangle_meter;
@@ -6,19 +8,19 @@ global float triangle_meter_p;
 0.0 => triangle_meter_p;
 
 // @knob min=0 max=0.7 step=0.01 default=0.18
-global float tri_amp;
+global float tri_amp;             // master level split across partials
 
 // @slider min=40 max=1000 step=1 default=165
-global float tri_freq;
+global float tri_freq;            // root pitch
 
 // @knob min=0 max=1 step=0.01 default=0.35
-global float tri_sub;
+global float tri_sub;             // mix of octave-down triangle
 
 // @knob min=0 max=1 step=0.01 default=0
-global float tri_fifth;
+global float tri_fifth;           // mix of perfect-fifth partial
 
 // @knob min=0 max=0.5 step=0.01 default=0
-global float tri_chorus;
+global float tri_chorus;          // very slow detune layer for width
 
 0.18 => tri_amp;
 165.0 => tri_freq;
@@ -27,7 +29,7 @@ global float tri_chorus;
 0.0 => tri_chorus;
 
 TriOsc osc => Gain g => triangle_meter => rackBus;
-TriOsc sub => g;
+TriOsc sub => g;                  // parallel oscillators summed in `g`
 TriOsc fifth => g;
 TriOsc ch => g;
 0.0 => osc.gain;
@@ -56,10 +58,10 @@ fun void follow() {
     tri_amp * tri_chorus * 0.35 => ch.gain;
 
     tri_freq => osc.freq;
-    tri_freq * 0.5 => sub.freq;
-    tri_freq * 1.5 => fifth.freq;
+    tri_freq * 0.5 => sub.freq;       // one octave down
+    tri_freq * 1.5 => fifth.freq;     // perfect fifth above root
     now / second => float t;
-    tri_freq * (1.0 + 0.003 * Math.sin(t * 0.7)) => ch.freq;
+    tri_freq * (1.0 + 0.003 * Math.sin(t * 0.7)) => ch.freq;   // slow chorus wobble
     5::ms => now;
   }
 }

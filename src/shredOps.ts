@@ -8,6 +8,10 @@ import { resolveChuckPath } from './chuckPaths';
 const ORDER_STATE_KEY = 'chuckLive.shredOrder';
 const SHRED_MIME = 'application/vnd.code.tree.chuckliveshreds';
 
+/** Client or listener text that means an OTF add/replace failed. */
+const OTF_FAIL_RE =
+  /(?:syntax error|parse error|REMOTE operation failed|cannot open file|skipping file|\berror:)/i;
+
 export interface ShredInfo {
   id: number;
   source: string;
@@ -15,20 +19,22 @@ export interface ShredInfo {
   isBridge?: boolean;
   /** True for the VU meter shred we manage. */
   isMeter?: boolean;
+  /** True for the sequencer transport shred we manage. */
+  isTransport?: boolean;
 }
 
 /**
- * Top-level .ck shreds only — not OSC bridge/meter, not `spork ~ follow()` children
+ * Top-level .ck shreds only — not OSC bridge/meter/transport, not `spork ~ follow()` children
  * that show up in VM status as source `spork~follow`.
  */
 export function isFileModule(
   source: string,
-  managed?: boolean | { isBridge?: boolean; isMeter?: boolean }
+  managed?: boolean | { isBridge?: boolean; isMeter?: boolean; isTransport?: boolean }
 ): boolean {
   const isManaged =
     typeof managed === 'boolean'
       ? managed
-      : !!(managed?.isBridge || managed?.isMeter);
+      : !!(managed?.isBridge || managed?.isMeter || managed?.isTransport);
   if (isManaged) {
     return false;
   }
@@ -50,9 +56,11 @@ export class ShredOps {
   private nextGuessId = 1;
   private bridgeId: number | undefined;
   private meterId: number | undefined;
+  private transportId: number | undefined;
   /** Last loaded bridge source — skip OTF replace if unchanged. */
   private lastBridgeSource = '';
   private lastMeterSource = '';
+  private lastTransportSource = '';
   /** User display order (absolute paths of user modules). */
   private userOrder: string[] = [];
 
@@ -91,7 +99,7 @@ export class ShredOps {
     const dragged = path.resolve(draggedSource);
     let order = this.listVisible()
       .filter((s) =>
-        isFileModule(s.source, { isBridge: s.isBridge, isMeter: s.isMeter })
+        isFileModule(s.source, { isBridge: s.isBridge, isMeter: s.isMeter, isTransport: s.isTransport })
       )
       .map((s) => path.resolve(s.source));
 
@@ -126,12 +134,13 @@ export class ShredOps {
       (s) =>
         s.isBridge ||
         s.isMeter ||
-        isFileModule(s.source, { isBridge: s.isBridge, isMeter: s.isMeter })
+        s.isTransport ||
+        isFileModule(s.source, { isBridge: s.isBridge, isMeter: s.isMeter, isTransport: s.isTransport })
     );
     const users = all.filter((s) =>
-      isFileModule(s.source, { isBridge: s.isBridge, isMeter: s.isMeter })
+      isFileModule(s.source, { isBridge: s.isBridge, isMeter: s.isMeter, isTransport: s.isTransport })
     );
-    const managed = all.filter((s) => s.isBridge || s.isMeter);
+    const managed = all.filter((s) => s.isBridge || s.isMeter || s.isTransport);
 
     const orderIndex = new Map(
       this.userOrder.map((p, i) => [path.resolve(p), i])
@@ -151,12 +160,12 @@ export class ShredOps {
       return a.id - b.id;
     });
 
-    // Bridge before meter among managed
+    // bridge → transport → meter among managed
     managed.sort((a, b) => {
-      if (a.isBridge !== b.isBridge) {
-        return a.isBridge ? -1 : 1;
-      }
-      return a.id - b.id;
+      const rank = (s: ShredInfo) =>
+        s.isBridge ? 0 : s.isTransport ? 1 : s.isMeter ? 2 : 3;
+      const d = rank(a) - rank(b);
+      return d !== 0 ? d : a.id - b.id;
     });
 
     return [...users, ...managed];
@@ -171,8 +180,7 @@ export class ShredOps {
     const abs = path.resolve(filePath);
     const { executable, otfPort } = getConfig();
     const client = otfClientExecutable(executable);
-    await this.otfAdd(client, otfPort, abs);
-    const id = this.nextGuessId++;
+    const id = await this.otfAdd(client, otfPort, abs);
     this.remember(id, abs);
     return this.byPath.get(abs) ?? id;
   }
@@ -201,12 +209,7 @@ export class ShredOps {
     this.ensureVm();
     const { executable, otfPort } = getConfig();
     const client = otfClientExecutable(executable);
-    await runChuck(client, [
-      '--silent',
-      `--port:${otfPort}`,
-      '-',
-      String(shredId),
-    ]);
+    await this.otfRemove(client, otfPort, shredId);
     this.forget(shredId);
   }
 
@@ -214,14 +217,22 @@ export class ShredOps {
     this.ensureVm();
     const { executable, otfPort } = getConfig();
     const client = otfClientExecutable(executable);
-    await runChuck(client, ['--silent', `--port:${otfPort}`, 'remove.all']);
+    const mark = this.vm.logMark();
+    await runChuck(client, ['--silent', `--port:${otfPort}`, '--remove.all']);
+    await this.vm.waitLogSince(
+      mark,
+      (delta) => delta.includes('removing all'),
+      2500
+    );
     this.byPath.clear();
     this.shreds.clear();
     this.bridgeId = undefined;
     this.meterId = undefined;
+    this.transportId = undefined;
     this.nextGuessId = 1;
     this.lastBridgeSource = '';
     this.lastMeterSource = '';
+    this.lastTransportSource = '';
     this._onDidChange.fire();
   }
 
@@ -229,8 +240,14 @@ export class ShredOps {
     this.ensureVm();
     const { executable, otfPort } = getConfig();
     const client = otfClientExecutable(executable);
+    const mark = this.vm.logMark();
     // Status prints on the *listener* console, not the client.
     await runChuck(client, ['--silent', `--port:${otfPort}`, '^']);
+    await this.vm.waitLogSince(
+      mark,
+      (delta) => delta.includes('[shred id]:'),
+      2500
+    );
   }
 
   /**
@@ -267,8 +284,7 @@ export class ShredOps {
       ]);
       this.remember(this.bridgeId, abs, { isBridge: true }, true);
     } else {
-      await this.otfAdd(client, otfPort, abs);
-      const id = this.nextGuessId++;
+      const id = await this.otfAdd(client, otfPort, abs);
       this.bridgeId = id;
       this.remember(id, abs, { isBridge: true }, true);
     }
@@ -309,12 +325,52 @@ export class ShredOps {
       ]);
       this.remember(this.meterId, abs, { isMeter: true }, true);
     } else {
-      await this.otfAdd(client, otfPort, abs);
-      const id = this.nextGuessId++;
+      const id = await this.otfAdd(client, otfPort, abs);
       this.meterId = id;
       this.remember(id, abs, { isMeter: true }, true);
     }
     this.lastMeterSource = src;
+    return true;
+  }
+
+  /**
+   * Add or replace the sequencer transport shred.
+   * Pass `source` to skip reload when content is unchanged.
+   */
+  async loadTransport(transportPath: string, source?: string): Promise<boolean> {
+    this.ensureVm();
+    const abs = path.resolve(transportPath);
+    const src =
+      source ??
+      (() => {
+        try {
+          return fs.readFileSync(abs, 'utf8');
+        } catch {
+          return '';
+        }
+      })();
+
+    if (src && src === this.lastTransportSource && this.transportId !== undefined) {
+      return false;
+    }
+
+    const { executable, otfPort } = getConfig();
+    const client = otfClientExecutable(executable);
+    if (this.transportId !== undefined) {
+      await runChuck(client, [
+        '--silent',
+        `--port:${otfPort}`,
+        '=',
+        String(this.transportId),
+        abs,
+      ]);
+      this.remember(this.transportId, abs, { isTransport: true }, true);
+    } else {
+      const id = await this.otfAdd(client, otfPort, abs);
+      this.transportId = id;
+      this.remember(id, abs, { isTransport: true }, true);
+    }
+    this.lastTransportSource = src;
     return true;
   }
 
@@ -323,9 +379,11 @@ export class ShredOps {
     this.shreds.clear();
     this.bridgeId = undefined;
     this.meterId = undefined;
+    this.transportId = undefined;
     this.nextGuessId = 1;
     this.lastBridgeSource = '';
     this.lastMeterSource = '';
+    this.lastTransportSource = '';
     this._onDidChange.fire();
   }
 
@@ -340,7 +398,7 @@ export class ShredOps {
   private remember(
     id: number,
     source: string,
-    flags: { isBridge?: boolean; isMeter?: boolean } = {},
+    flags: { isBridge?: boolean; isMeter?: boolean; isTransport?: boolean } = {},
     silent = false
   ): void {
     const abs = path.resolve(source);
@@ -354,7 +412,8 @@ export class ShredOps {
     const existing = this.shreds.get(id);
     const isBridge = flags.isBridge ?? existing?.isBridge ?? false;
     const isMeter = flags.isMeter ?? existing?.isMeter ?? false;
-    this.shreds.set(id, { id, source: abs, isBridge, isMeter });
+    const isTransport = flags.isTransport ?? existing?.isTransport ?? false;
+    this.shreds.set(id, { id, source: abs, isBridge, isMeter, isTransport });
     if (id >= this.nextGuessId) {
       this.nextGuessId = id + 1;
     }
@@ -364,10 +423,14 @@ export class ShredOps {
     if (isMeter) {
       this.meterId = id;
     }
+    if (isTransport) {
+      this.transportId = id;
+    }
     if (
       !isBridge &&
       !isMeter &&
-      isFileModule(abs, { isBridge, isMeter })
+      !isTransport &&
+      isFileModule(abs, { isBridge, isMeter, isTransport })
     ) {
       this.ensureInOrder(abs);
     }
@@ -385,6 +448,7 @@ export class ShredOps {
         isFileModule(info.source, {
           isBridge: info.isBridge,
           isMeter: info.isMeter,
+          isTransport: info.isTransport,
         })
       ) {
         const abs = path.resolve(info.source);
@@ -398,11 +462,32 @@ export class ShredOps {
     if (this.meterId === id) {
       this.meterId = undefined;
     }
+    if (this.transportId === id) {
+      this.transportId = undefined;
+    }
     this._onDidChange.fire();
   }
 
   private parseStatusLine(line: string): void {
-    // [shred id]: 1 [source]: foo.ck [sporked]: ...
+    // ChucK 1.5+: [chuck]: (VM) sporking incoming shred: 2 (foo.ck)...
+    const spork = line.match(/sporking incoming shred:\s*(\d+)\s*\(([^)]+)\)/);
+    if (spork) {
+      const id = Number(spork[1]);
+      const sourceName = spork[2];
+      const existing = [...this.shreds.values()].find(
+        (s) => path.basename(s.source) === sourceName
+      );
+      if (existing) {
+        this.remember(id, existing.source, {
+          isBridge: existing.isBridge,
+          isMeter: existing.isMeter,
+          isTransport: existing.isTransport,
+        });
+      }
+      return;
+    }
+
+    // [chuck]: [shred id]: 1 [source]: foo.ck [spork time]: ...
     const m = line.match(/\[shred id\]:\s*(\d+)\s*\[source\]:\s*(\S+)/);
     if (!m) {
       return;
@@ -423,18 +508,23 @@ export class ShredOps {
       /meter\.ck$/i.test(source) ||
       this.meterId === id ||
       !!existing?.isMeter;
-    this.remember(id, abs, { isBridge, isMeter });
+    const isTransport =
+      abs.includes('chuck-live-transport') ||
+      abs.endsWith('transport.ck') ||
+      /transport\.ck$/i.test(source) ||
+      this.transportId === id ||
+      !!existing?.isTransport;
+    this.remember(id, abs, { isBridge, isMeter, isTransport });
   }
 
   /**
-   * `chuck + file` often exits 0 even when the VM never got the packet.
-   * Confirm via VM log text (not event timing) and retry.
+   * OTF add via `chuck + file`. Returns the VM-assigned shred id (from listener log).
    */
   private async otfAdd(
     client: string,
     otfPort: number,
     abs: string
-  ): Promise<void> {
+  ): Promise<number> {
     const base = path.basename(abs);
     const args = ['--silent', `--port:${otfPort}`, '+', abs];
     for (let attempt = 1; attempt <= 5; attempt++) {
@@ -445,24 +535,89 @@ export class ShredOps {
         if (out.trim()) {
           this.vm.output.appendLine(out.trimEnd());
         }
+        if (OTF_FAIL_RE.test(out)) {
+          throw new Error(out.trim() || 'OTF client reported failure');
+        }
+        const id = await this.waitSporkId(mark, base);
+        if (id !== undefined) {
+          return id;
+        }
+        const vmRejected = await this.vm.waitLogSince(
+          mark,
+          (delta) => OTF_FAIL_RE.test(delta),
+          200
+        );
+        if (vmRejected) {
+          throw new Error('VM rejected OTF add');
+        }
+        this.vm.output.appendLine(
+          `[warn] OTF add id not logged (${base}) — using next id ${this.nextGuessId}`
+        );
+        return this.nextGuessId++;
       } catch (err) {
-        this.vm.output.appendLine(`[warn] OTF client: ${err}`);
+        this.vm.output.appendLine(`[warn] OTF add (${base}): ${err}`);
       }
-      const ok = await this.vm.waitLogSince(
-        mark,
-        (delta) =>
-          delta.includes('sporking incoming shred') && delta.includes(base),
-        2500
-      );
-      if (ok) {
-        return;
+      if (attempt < 5) {
+        await new Promise((r) => setTimeout(r, 300));
       }
-      this.vm.output.appendLine(
-        `[warn] OTF add not confirmed (${base}), retry ${attempt}/5`
-      );
-      await new Promise((r) => setTimeout(r, 300));
     }
     throw new Error(`OTF add did not reach the VM: ${base}`);
+  }
+
+  private async otfRemove(
+    client: string,
+    otfPort: number,
+    shredId: number
+  ): Promise<void> {
+    const mark = this.vm.logMark();
+    const args = ['--silent', `--port:${otfPort}`, '-', String(shredId)];
+    this.vm.output.appendLine(`$ ${client} ${args.join(' ')}`);
+    const out = await runChuck(client, args, 8000);
+    if (out.trim()) {
+      this.vm.output.appendLine(out.trimEnd());
+    }
+    if (OTF_FAIL_RE.test(out)) {
+      throw new Error(out.trim() || 'OTF remove failed');
+    }
+    let removed = false;
+    let notFound = false;
+    await this.vm.waitLogSince(mark, (delta) => {
+      if (new RegExp(`removing shred:\\s*${shredId}\\b`).test(delta)) {
+        removed = true;
+        return true;
+      }
+      if (delta.includes(`cannot remove: no shred with id ${shredId}`)) {
+        notFound = true;
+        return true;
+      }
+      return false;
+    }, 2500);
+    if (notFound) {
+      throw new Error(`Shred #${shredId} is not running in the VM`);
+    }
+    if (!removed) {
+      throw new Error(`Remove not confirmed for shred #${shredId}`);
+    }
+  }
+
+  /** Wait for `(VM) sporking incoming shred: N (basename)...` on the listener. */
+  private async waitSporkId(
+    mark: number,
+    base: string
+  ): Promise<number | undefined> {
+    let sporkId: number | undefined;
+    await this.vm.waitLogSince(mark, (delta) => {
+      const re = /sporking incoming shred:\s*(\d+)\s*\(([^)]+)\)/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(delta)) !== null) {
+        if (m[2] === base) {
+          sporkId = Number(m[1]);
+          return true;
+        }
+      }
+      return false;
+    }, 2500);
+    return sporkId;
   }
 
   private ensureVm(): void {
@@ -491,23 +646,35 @@ export class ShredTreeProvider implements vscode.TreeDataProvider<ShredInfo> {
     let label: string;
     if (el.isBridge) {
       label = `#${el.id} bridge (OSC)`;
+    } else if (el.isTransport) {
+      label = `#${el.id} transport (seq)`;
     } else if (el.isMeter) {
       label = `#${el.id} meter (VU)`;
     } else {
       label = `#${el.id} ${name}`;
     }
+    const managed = !!(el.isBridge || el.isMeter || el.isTransport);
     const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
     item.description = el.source;
-    item.tooltip = el.isBridge || el.isMeter
+    item.tooltip = managed
       ? el.source
       : `${el.source}\nDrag to reorder · Sync icon reloads`;
-    item.contextValue =
-      el.isBridge || el.isMeter ? 'chuckManagedShred' : 'chuckUserShred';
+    item.contextValue = managed ? 'chuckManagedShred' : 'chuckUserShred';
     item.iconPath = new vscode.ThemeIcon(
-      el.isBridge ? 'radio-tower' : el.isMeter ? 'pulse' : 'file-code'
+      el.isBridge
+        ? 'radio-tower'
+        : el.isTransport
+          ? 'watch'
+          : el.isMeter
+            ? 'pulse'
+            : 'file-code'
     );
     if (
-      isFileModule(el.source, { isBridge: el.isBridge, isMeter: el.isMeter })
+      isFileModule(el.source, {
+        isBridge: el.isBridge,
+        isMeter: el.isMeter,
+        isTransport: el.isTransport,
+      })
     ) {
       try {
         item.resourceUri = vscode.Uri.file(el.source);
@@ -542,7 +709,7 @@ export class ShredTreeDragAndDropController
     dataTransfer: vscode.DataTransfer
   ): void {
     const user = source.filter((s) =>
-      isFileModule(s.source, { isBridge: s.isBridge, isMeter: s.isMeter })
+      isFileModule(s.source, { isBridge: s.isBridge, isMeter: s.isMeter, isTransport: s.isTransport })
     );
     if (user.length === 0) {
       return;
@@ -572,6 +739,7 @@ export class ShredTreeDragAndDropController
       isFileModule(target.source, {
         isBridge: target.isBridge,
         isMeter: target.isMeter,
+        isTransport: target.isTransport,
       })
         ? target.source
         : undefined;

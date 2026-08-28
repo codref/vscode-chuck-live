@@ -18,6 +18,8 @@
     const msg = event.data;
     if (msg.type === 'setRack') {
       render(msg.modules || []);
+    } else if (msg.type === 'setKnob' && msg.name !== undefined && msg.value !== undefined) {
+      applyKnobValue(msg.name, Number(msg.value));
     } else if (msg.type === 'vu') {
       paintMasterVu(Number(msg.l) || 0, Number(msg.r) || 0);
     } else if (msg.type === 'peaks') {
@@ -51,8 +53,15 @@
 
   function makeModule(mod) {
     const el = document.createElement('div');
-    el.className = 'module' + (mod.isMaster ? ' master' : '');
-    el.dataset.shredId = String(mod.id);
+    el.className =
+      'module' +
+      (mod.isMaster ? ' master' : '') +
+      (mod.isTransport ? ' transport' : '');
+    if (mod.isTransport) {
+      el.dataset.shredId = 'transport';
+    } else {
+      el.dataset.shredId = String(mod.id);
+    }
 
     const accent = document.createElement('div');
     accent.className = 'mod-accent';
@@ -66,7 +75,9 @@
     title.title = mod.file || mod.title;
     const id = document.createElement('div');
     id.className = 'mod-id';
-    id.textContent = '#' + mod.id + (mod.isMaster ? ' · MASTER' : '');
+    id.textContent = mod.isTransport
+      ? 'SEQ · tempo'
+      : '#' + mod.id + (mod.isMaster ? ' · MASTER' : '');
     head.appendChild(title);
     head.appendChild(id);
 
@@ -93,11 +104,14 @@
     }
 
     el.appendChild(accent);
-    if (!mod.isMaster) {
+    if (!mod.isMaster && !mod.isTransport) {
       const led = document.createElement('div');
       led.className = 'mod-peak-led';
       led.title = 'Peak';
       accent.appendChild(led);
+      const peakFill = document.createElement('div');
+      peakFill.className = 'mod-peak-fill';
+      accent.appendChild(peakFill);
     }
     el.appendChild(head);
     el.appendChild(controls);
@@ -194,6 +208,10 @@
       led.classList.remove('on', 'hot', 'clip');
       led.style.opacity = '';
     }
+    for (const fill of caseEl.querySelectorAll('.mod-peak-fill')) {
+      fill.style.width = '0%';
+      fill.classList.remove('hot', 'clip');
+    }
     for (const bar of caseEl.querySelectorAll('.mod-meter-bar')) {
       bar.style.width = '0%';
       bar.classList.remove('clip');
@@ -241,12 +259,18 @@
       el.classList.toggle('peaking', on && !clip);
       el.classList.toggle('clipping', clip);
       const led = el.querySelector('.mod-peak-led');
+      const fill = el.querySelector('.mod-peak-fill');
+      const pct = dbToPct(db);
+      if (fill) {
+        fill.style.width = on || clip ? pct + '%' : '0%';
+        fill.classList.toggle('hot', hot && !clip);
+        fill.classList.toggle('clip', clip);
+      }
       if (!led) continue;
       led.classList.toggle('on', on && !hot && !clip);
       led.classList.toggle('hot', hot && !clip);
       led.classList.toggle('clip', clip);
-      const t = Math.max(0, Math.min(1, (db - LED_ON_DB) / (0 - LED_ON_DB)));
-      led.style.opacity = on || clip ? String(0.4 + t * 0.6) : '';
+      led.style.opacity = '';
     }
   }
 
@@ -432,9 +456,38 @@
   }
 
   function shortName(n) {
+    if (n === 'live_bpm') return 'BPM';
     // saw_cutoff → cutoff; master_amp → amp
     const parts = String(n).split('_');
     return parts.length > 1 ? parts.slice(1).join('_') : n;
+  }
+
+  /** Update a dial/slider display without sending OSC (host mirror). */
+  function applyKnobValue(name, value) {
+    saved.values[name] = value;
+    vscode.setState(saved);
+    if (!caseEl) return;
+    for (const cell of caseEl.querySelectorAll('.cell')) {
+      const title = cell.querySelector('.cell-name');
+      if (!title || title.title !== name) continue;
+      const dial = cell.querySelector('.dial');
+      const slider = cell.querySelector('input[type="range"]');
+      const valEl = cell.querySelector('.cell-value');
+      if (dial) {
+        const min = 40;
+        const max = 200;
+        const pointer = dial.querySelector('.dial-pointer');
+        if (pointer) {
+          pointer.style.transform =
+            'rotate(' + normToAngle(norm(value, min, max)) + 'deg)';
+        }
+        if (valEl) valEl.textContent = fmt(value);
+      } else if (slider && valEl) {
+        slider.value = String(value);
+        valEl.textContent = fmt(value);
+      }
+      break;
+    }
   }
 
   function norm(v, min, max) {

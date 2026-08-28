@@ -77,6 +77,7 @@ function sessionRoles(
       !isFileModule(shred.source, {
         isBridge: shred.isBridge,
         isMeter: shred.isMeter,
+        isTransport: shred.isTransport,
       })
     ) {
       continue;

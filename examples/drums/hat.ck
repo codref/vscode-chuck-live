@@ -1,4 +1,6 @@
-// drums/hat.ck — noise hat into rackBus. Load master first; sequence dk_hat.
+// drums/hat.ck — noise hi-hat into rackBus. Load master first; sequence dk_hat.
+//
+// Simple gate drum: Event → keyOn → wait decay → keyOff. HPF + short ADSR = hat.
 
 global Gain rackBus;
 global Gain hat_meter;
@@ -11,9 +13,9 @@ global Event dk_hat;
 // @knob min=0 max=0.5 step=0.01 default=0.18
 global float dk_hat_amp;
 // @knob min=5 max=80 step=1 default=25
-global float dk_hat_dec;
+global float dk_hat_dec;          // envelope length (ms)
 // @slider min=2000 max=12000 step=50 default=7000
-global float dk_hat_color;
+global float dk_hat_color;        // HPF cutoff — brightness
 
 0.18 => dk_hat_amp;
 25.0 => dk_hat_dec;
@@ -22,7 +24,7 @@ global float dk_hat_color;
 Noise n => HPF hp => ADSR env => Gain g => hat_meter => rackBus;
 env.set(1::ms, 25::ms, 0.0, 15::ms);
 7000 => hp.freq;
-1.0 => n.gain;
+1.0 => n.gain;                    // noise always on; envelope shapes amplitude
 0.0 => g.gain;
 
 spork ~ onHat();
@@ -51,7 +53,7 @@ fun void follow() {
 
 fun void onHat() {
   while (true) {
-    dk_hat => now;
+    dk_hat => now;                // sequencer gate
     env.keyOn();
     dk_hat_dec::ms => now;
     env.keyOff();

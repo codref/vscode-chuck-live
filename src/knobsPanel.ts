@@ -68,7 +68,7 @@ export class KnobsPanelProvider implements vscode.WebviewViewProvider {
       groups: this.groups,
     });
 
-    if (reloadBridge) {
+    if (reloadBridge && this.shredOps.list().some((s) => s.isBridge)) {
       const { oscPort } = getConfig();
       const bridge = writeBridgeFile(this.allForBridge, oscPort);
       try {
@@ -152,9 +152,11 @@ export function collectAnnotationSources(
     if (
       shred.isBridge ||
       shred.isMeter ||
+      shred.isTransport ||
       !isFileModule(shred.source, {
         isBridge: shred.isBridge,
         isMeter: shred.isMeter,
+        isTransport: shred.isTransport,
       })
     ) {
       continue;

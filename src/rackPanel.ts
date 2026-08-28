@@ -3,8 +3,8 @@ import { getConfig } from './config';
 import { OscClient } from './oscClient';
 import { OscServer, OscMessage } from './oscServer';
 import { ShredOps } from './shredOps';
-import { buildModulesFromShreds, RackModule } from './rackModel';
-import { writeBridgeFile } from './bridgeGen';
+import { buildRackModules, RackModule } from './rackModel';
+import { writeBridgeFile, LIVE_TRANSPORT } from './bridgeGen';
 import { collectAnnotations } from './knobsPanel';
 
 /**
@@ -15,6 +15,7 @@ import { collectAnnotations } from './knobsPanel';
 export class RackPanel {
   private panel: vscode.WebviewPanel | undefined;
   private modules: RackModule[] = [];
+  private liveBpm = 120;
   /** Shred ids matching /chuck/peaks float order from the meter shred. */
   private peakIds: number[] = [];
   private readonly onOsc: (msg: OscMessage) => void;
@@ -27,7 +28,8 @@ export class RackPanel {
     private readonly onBridgeNeeded: (
       bridgePath: string,
       source?: string
-    ) => Promise<boolean | void>
+    ) => Promise<boolean | void>,
+    private readonly onLiveBpmChange?: (bpm: number) => void
   ) {
     this.onOsc = (msg: OscMessage) => this.forwardMeter(msg);
     this.oscServer.on('message', this.onOsc);
@@ -75,8 +77,19 @@ export class RackPanel {
     this.panel?.webview.postMessage({ type: 'resetMeter' });
   }
 
+  /** Mirror sequencer / transport BPM on the rack dial (display only). */
+  setLiveBpm(bpm: number): void {
+    const safe = Math.max(40, Math.min(200, bpm));
+    this.liveBpm = safe;
+    this.panel?.webview.postMessage({
+      type: 'setKnob',
+      name: LIVE_TRANSPORT.bpm,
+      value: safe,
+    });
+  }
+
   async refresh(reloadBridge = false): Promise<void> {
-    this.modules = buildModulesFromShreds(this.shredOps);
+    this.modules = buildRackModules(this.shredOps, this.liveBpm);
     this.panel?.webview.postMessage({
       type: 'setRack',
       modules: this.modules,
@@ -132,6 +145,11 @@ export class RackPanel {
     const { oscPort } = getConfig();
     if (msg.type === 'knob' && msg.name !== undefined && msg.value !== undefined) {
       this.osc.sendFloat('127.0.0.1', oscPort, `/chuck/${msg.name}`, msg.value);
+      if (msg.name === LIVE_TRANSPORT.bpm) {
+        const bpm = Math.max(40, Math.min(200, msg.value));
+        this.liveBpm = bpm;
+        this.onLiveBpmChange?.(bpm);
+      }
     } else if (msg.type === 'button' && msg.name !== undefined) {
       this.osc.sendInt('127.0.0.1', oscPort, `/chuck/${msg.name}`, 1);
     } else if (msg.type === 'ready') {

@@ -1,4 +1,6 @@
-// oscillators/saw.ck — bright saw into rackBus (load master.ck first).
+// oscillators/saw.ck — bright sawtooth into rackBus (load master.ck first).
+//
+// Saw is rich in harmonics — LPF + optional drive tame it before master.ck.
 
 global Gain rackBus;
 global Gain saw_meter;
@@ -18,7 +20,7 @@ global float saw_cutoff;
 global float saw_Q;
 
 // @knob min=0 max=1 step=0.01 default=0
-global float saw_drive;
+global float saw_drive;          // extra Gain stage before the bus
 
 0.15 => saw_amp;
 55.0 => saw_freq;
@@ -49,7 +51,7 @@ fun void follow() {
     saw_freq => osc.freq;
     saw_cutoff => lpf.freq;
     saw_Q => lpf.Q;
-    1.0 + saw_drive * 4.0 => drive.gain;
+    1.0 + saw_drive * 4.0 => drive.gain;   // soft clip-ish saturation
     5::ms => now;
   }
 }

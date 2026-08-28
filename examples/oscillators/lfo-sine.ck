@@ -1,4 +1,6 @@
-// oscillators/lfo-sine.ck — slow pad into rackBus (load master.ck first).
+// oscillators/lfo-sine.ck — slow drifting pad into rackBus (load master.ck first).
+//
+// Two slightly detuned sines + built-in NRev — good atmospheric layer under drums.
 
 global Gain rackBus;
 global Gain lfo_sine_meter;
@@ -9,16 +11,16 @@ global float lfo_sine_meter_p;
 global float lfo_amp;
 
 // @slider min=0.05 max=20 step=0.01 default=0.25
-global float lfo_rate;
+global float lfo_rate;            // pitch LFO speed (Hz) — not the same as live transport
 
 // @slider min=40 max=600 step=1 default=82
-global float lfo_center;
+global float lfo_center;          // center pitch (Hz)
 
 // @knob min=0 max=40 step=0.1 default=8
-global float lfo_depth;
+global float lfo_depth;           // pitch wobble amount (± Hz)
 
 // @knob min=0 max=1 step=0.01 default=0.4
-global float lfo_space;
+global float lfo_space;           // wet mix + detune spread
 
 0.22 => lfo_amp;
 0.25 => lfo_rate;
@@ -27,7 +29,7 @@ global float lfo_space;
 0.4 => lfo_space;
 
 SinOsc a => Gain g => NRev rev;
-SinOsc b => g;
+SinOsc b => g;                    // twin osc for thickness
 rev.chan(0) => lfo_sine_meter;
 rev.chan(1) => lfo_sine_meter;
 lfo_sine_meter => rackBus;
@@ -56,7 +58,7 @@ fun void follow() {
 
     now / second => float t;
     lfo_center + Math.sin(2.0 * Math.PI * lfo_rate * t) * lfo_depth => a.freq;
-    a.freq() * 1.005 => b.freq;
+    a.freq() * 1.005 => b.freq;     // tiny static detune on top of LFO
     5::ms => now;
   }
 }

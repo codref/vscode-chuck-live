@@ -1,26 +1,29 @@
-// cyberpunk.ck — neon rain, dark bass, hex arp, glitch stutter
-// Start VM → Add this file → twist knobs / hit bang for a street-run drop.
+// cyberpunk.ck — neon rain, dark bass, hex arp, glitch stutter (standalone patch).
+//
+// Unlike bus examples, this is self-contained: one file → dac, no master.ck.
+// Start VM → Add this file → Knobs / Sequencer optional (only globals annotated).
+// Good reference for multi-voice patches with several sporked control loops.
 
 // @knob min=0 max=0.8 step=0.01 default=0.35
-global float master;
+global float master;              // final output level
 
 // @knob min=0 max=1 step=0.01 default=0.55
-global float bass;
+global float bass;                // sub layer mix
 
 // @slider min=200 max=4000 step=10 default=900
-global float cutoff;
+global float cutoff;              // shared darkness — main LPF + derived freqs
 
 // @slider min=4 max=24 step=1 default=12
-global float arpHz;
+global float arpHz;               // arpeggiator rate (notes per second)
 
 // @knob min=0 max=1 step=0.01 default=0.25
-global float glitch;
+global float glitch;              // chaos amount — stutter, octave jumps, clicks
 
 // @knob min=0 max=0.4 step=0.01 default=0.12
-global float rain;
+global float rain;                // digital rain noise layer
 
 // @button
-global Event bang;
+global Event bang;                // manual "drop" — filter sweep + silence stutter
 
 0.35 => master;
 0.55 => bass;
@@ -29,7 +32,8 @@ global Event bang;
 0.25 => glitch;
 0.12 => rain;
 
-// ---- bus ----
+// ---- master bus ----
+// Everything sums into `mix`, then dark LPF → hall reverb → output Gain → dac.
 Gain mix => LPF dark => NRev hall => Gain out => dac;
 0.12 => hall.mix;
 900 => dark.freq;
@@ -42,10 +46,10 @@ SawOsc sub => LPF subLp => Gain subG => mix;
 0.18 => sub.gain;
 120 => subLp.freq;
 1.2 => subLp.Q;
-0.0 => subG.gain;
+0.0 => subG.gain;                 // follow() maps `bass` knob here
 
 // slightly detuned twin for thickness
-SawOsc sub2 => subLp;
+SawOsc sub2 => subLp;             // parallel into same filter
 54.4 => sub2.freq;
 0.12 => sub2.gain;
 
@@ -53,13 +57,13 @@ SawOsc sub2 => subLp;
 SawOsc p1 => Gain padG => Echo trail => mix;
 SawOsc p2 => padG;
 SawOsc p3 => padG;
-110.0 => p1.freq;
-138.59 => p2.freq;  // m3
-164.81 => p3.freq;  // P5
+110.0 => p1.freq;                 // A2 root
+138.59 => p2.freq;                // minor third (C#3)
+164.81 => p3.freq;                // perfect fifth (E3)
 0.04 => p1.gain;
 0.035 => p2.gain;
 0.03 => p3.gain;
-0.0 => padG.gain;
+0.0 => padG.gain;                 // breathes via follow() + padBreathe()
 450::ms => trail.delay;
 0.35 => trail.mix;
 0.55 => trail.gain;
@@ -67,7 +71,7 @@ SawOsc p3 => padG;
 // ---- hex arp ----
 PulseOsc arp => ADSR arpEnv => LPF arpLp => Gain arpG => mix;
 0.35 => arp.width;
-0.0 => arp.gain;
+0.0 => arp.gain;                  // hexArp() sets level per note
 arpEnv.set(2::ms, 40::ms, 0.0, 20::ms);
 1800 => arpLp.freq;
 0.0 => arpG.gain;
@@ -77,7 +81,7 @@ arpEnv.set(2::ms, 40::ms, 0.0, 20::ms);
 
 // ---- digital rain ----
 Noise hiss => BPF rainBp => Gain rainG => mix;
-0.0 => hiss.gain;
+0.0 => hiss.gain;                 // rainFall() randomizes level + BPF freq
 4200 => rainBp.freq;
 2.5 => rainBp.Q;
 0.0 => rainG.gain;
@@ -89,16 +93,16 @@ spitEnv.set(0.5::ms, 8::ms, 0.0, 5::ms);
 0.0 => spit.gain;
 0.0 => spitG.gain;
 
-// ---- control / voices ----
-spork ~ follow();
-spork ~ padBreathe();
-spork ~ hexArp();
-spork ~ rainFall();
-spork ~ glitchTicks();
-spork ~ onBang();
+// ---- control shreds (ChucK concurrency) ----
+spork ~ follow();                 // knob → mix levels + filter
+spork ~ padBreathe();             // slow pad detune LFO
+spork ~ hexArp();                 // timed note sequence
+spork ~ rainFall();               // random rain texture
+spork ~ glitchTicks();            // sporadic digital clicks
+spork ~ onBang();                 // button drop effect
 
 while (true) {
-  20::ms => now;
+  20::ms => now;                  // keep root shred alive
 }
 
 fun void follow() {
@@ -106,18 +110,18 @@ fun void follow() {
     master => out.gain;
     bass * 0.55 => subG.gain;
     cutoff => dark.freq;
-    cutoff * 1.4 => arpLp.freq;
+    cutoff * 1.4 => arpLp.freq;   // arp brighter than pad bus
     Math.max(80.0, cutoff * 0.12) => subLp.freq;
     rain => rainG.gain;
     glitch * 0.45 => spitG.gain;
     0.12 + glitch * 0.2 => padG.gain;
-    0.22 + (1.0 - glitch) * 0.15 => arpG.gain;
+    0.22 + (1.0 - glitch) * 0.15 => arpG.gain;   // arp ducks when glitch rises
     8::ms => now;
   }
 }
 
 fun void padBreathe() {
-  // slow LFO on pad detune — neon wobble
+  // slow LFO on pad detune — neon wobble (independent of knob poll rate)
   while (true) {
     now / second => float t;
     110.0 + Math.sin(t * 0.15) * 1.2 => p1.freq;
@@ -137,7 +141,7 @@ fun void hexArp() {
     }
     0.28 => arp.gain;
     arpEnv.keyOn();
-    (1.0 / Math.max(4.0, arpHz))::second => now;
+    (1.0 / Math.max(4.0, arpHz))::second => now;   // note length from arpHz slider
     arpEnv.keyOff();
     2::ms => now;
     (i + 1) % hex.size() => i;
@@ -146,7 +150,7 @@ fun void hexArp() {
 
 fun void rainFall() {
   while (true) {
-    Math.random2f(2800.0, 7200.0) => rainBp.freq;
+    Math.random2f(2800.0, 7200.0) => rainBp.freq;   // shimmer band random walk
     0.015 + rain * 0.04 => hiss.gain;
     Math.random2f(30.0, 90.0)::ms => now;
   }
@@ -166,31 +170,31 @@ fun void glitchTicks() {
 }
 
 fun void onBang() {
-  // street-run drop: filter open + stutter + sub slam
+  // street-run drop: filter open + silence stutter + sub slam
   while (true) {
-    bang => now;
-    cutoff => float cutSave;
+    bang => now;                  // Knobs button from extension
+    cutoff => float cutSave;      // stash knob values to restore after drop
     master => float mastSave;
     bass => float bassSave;
 
     0.7 => master;
     1.0 => bass;
-    3200.0 => cutoff;
+    3200.0 => cutoff;             // temporary brightness
 
-    repeat (8) {
+    repeat (8) {                  // gated silence stutter on master out
       0.0 => out.gain;
       28::ms => now;
       master * 0.9 => out.gain;
       42::ms => now;
     }
 
-    // neon sweep down
+    // neon sweep down — manual filter animation
     for (0 => int i; i < 50; i++) {
       3200.0 - i * 40.0 => cutoff;
       12::ms => now;
     }
 
-    cutSave => cutoff;
+    cutSave => cutoff;            // restore user knob settings
     mastSave => master;
     bassSave => bass;
   }

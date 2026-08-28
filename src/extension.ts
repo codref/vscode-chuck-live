@@ -15,6 +15,7 @@ import { StatusBar } from './statusBar';
 import { KnobsPanelProvider, collectAnnotations } from './knobsPanel';
 import { writeBridgeFile } from './bridgeGen';
 import { writeMeterFile, meterTapName, MeterTap } from './meterGen';
+import { writeTransportFile } from './transportGen';
 import { buildModulesFromShreds } from './rackModel';
 import { RackPanel } from './rackPanel';
 import { SeqPanel } from './seqPanel';
@@ -23,6 +24,7 @@ import { AnnotationCompletionProvider } from './annotationComplete';
 import { ControlTreeProvider } from './controlView';
 import { ShredCodeLensProvider } from './shredLens';
 import { confirmAddGuardrails } from './shredGuardrails';
+import { OscMessage } from './oscServer';
 
 async function revealSessionViews(): Promise<void> {
   // Cursor/VS Code can leave these promises pending forever — never block Start on them.
@@ -68,16 +70,22 @@ export function activate(context: vscode.ExtensionContext): void {
     loadBridge
   );
 
+  let seq!: SeqPanel;
+
   const rack = new RackPanel(
     context.extensionUri,
     osc,
     shredOps,
     oscServer,
-    loadBridge
+    loadBridge,
+    (bpm) => seq.setMasterBpm(bpm)
   );
 
   const reloadMeter = async (): Promise<void> => {
     if (!vm.running) {
+      return;
+    }
+    if (!shredOps.list().some((s) => s.isMeter)) {
       return;
     }
     const { meterPort } = getConfig();
@@ -97,6 +105,36 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
 
+  const loadTransport = async (
+    transportPath: string,
+    source?: string
+  ): Promise<boolean> => {
+    if (!vm.running) {
+      return false;
+    }
+    return shredOps.loadTransport(transportPath, source);
+  };
+
+  const reloadTransportIdle = async (): Promise<void> => {
+    if (!vm.running) {
+      return;
+    }
+    const { meterPort } = getConfig();
+    const file = writeTransportFile({
+      bpm: 120,
+      step: 0,
+      running: false,
+      swingEnabled: false,
+      meterPort,
+      tracks: [],
+    });
+    try {
+      await shredOps.loadTransport(file.path, file.source);
+    } catch (err) {
+      vm.output.appendLine(`[warn] transport load: ${err}`);
+    }
+  };
+
   let meterReloadTimer: ReturnType<typeof setTimeout> | undefined;
   const reloadMeterSoon = (): void => {
     if (meterReloadTimer !== undefined) {
@@ -108,12 +146,21 @@ export function activate(context: vscode.ExtensionContext): void {
     }, 80);
   };
 
-  const seq = new SeqPanel(
+  seq = new SeqPanel(
     context.extensionUri,
     osc,
     shredOps,
-    loadBridge
+    loadBridge,
+    loadTransport,
+    (bpm) => rack.setLiveBpm(bpm)
   );
+
+  const onMeterOsc = (msg: OscMessage): void => {
+    if (msg.address === '/chuck/live_playhead' && msg.floats.length >= 1) {
+      seq.onPlayheadOsc(msg.floats[0], msg.floats[1] ?? 0);
+    }
+  };
+  oscServer.on('message', onMeterOsc);
 
   context.subscriptions.push(
     vm,
@@ -122,6 +169,7 @@ export function activate(context: vscode.ExtensionContext): void {
     statusBar,
     { dispose: () => rack.dispose() },
     { dispose: () => seq.dispose() },
+    { dispose: () => oscServer.off('message', onMeterOsc) },
     vscode.window.createTreeView('chuckLive.sessionShreds', {
       treeDataProvider: tree,
       dragAndDropController: shredDnd,
@@ -186,6 +234,16 @@ export function activate(context: vscode.ExtensionContext): void {
       }
 
       try {
+        await reloadTransportIdle();
+        seq.seedTransportDefaults(120);
+        rack.setLiveBpm(120);
+        vm.output.appendLine('[ok] transport loaded');
+      } catch (err) {
+        vscode.window.showWarningMessage(`Transport load: ${err}`);
+        vm.output.appendLine(`[warn] transport load: ${err}`);
+      }
+
+      try {
         await reloadMeter();
         vm.output.appendLine('[ok] meter loaded');
       } catch (err) {
@@ -246,6 +304,7 @@ export function activate(context: vscode.ExtensionContext): void {
         isFileModule(item.source, {
           isBridge: item.isBridge,
           isMeter: item.isMeter,
+          isTransport: item.isTransport,
         })
       ) {
         file = item.source;
@@ -297,6 +356,7 @@ export function activate(context: vscode.ExtensionContext): void {
         const picks = shredOps.list().map((s) => ({
           label: `#${s.id} ${path.basename(s.source)}`,
           id: s.id,
+          info: s,
         }));
         const chosen = await vscode.window.showQuickPick(picks, {
           placeHolder: 'Remove shred',
@@ -305,14 +365,15 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         id = chosen.id;
+        item = chosen.info;
       }
       try {
         await shredOps.remove(id);
-        await knobs.refresh(true);
+        await knobs.refresh(!item?.isBridge);
         if (rack.isOpen) {
           void rack.refresh(false);
         }
-        if (seq.isOpen) {
+        if (seq.isOpen && !item?.isTransport) {
           void seq.ensureBridge().then(() => seq.pushTargets());
         }
       } catch (err) {

@@ -87,6 +87,90 @@
     });
   }
 
+  /** Sync ON → ChucK transport owns musical time. */
+  function useChuckClock() {
+    return !!syncClocks;
+  }
+
+  function anyTrackRunning() {
+    return trackOrder.some((n) => patterns[n] && patterns[n].running);
+  }
+
+  function publishTransport(extra) {
+    const payload = Object.assign(
+      {
+        type: 'transport',
+        bpm: masterBpm,
+        step: sharedPlayhead,
+        running: anyTrackRunning(),
+        swingEnabled: swingEnabled,
+      },
+      extra || {}
+    );
+    vscode.postMessage(payload);
+  }
+
+  function liveValuesForDump(p) {
+    ensureBanks(p);
+    const live = liveBank(p);
+    let values = live.values.slice(0, 16);
+    if (p.kind !== 'gate' && p.mode === 'midi') {
+      values = values.map((v) => snapMidi(v));
+    }
+    return values;
+  }
+
+  /** Full pattern snapshot for ChucK transport regeneration. */
+  function dumpTransport(opts) {
+    opts = opts || {};
+    const running =
+      opts.running !== undefined ? !!opts.running : anyTrackRunning();
+    const step =
+      opts.step !== undefined ? opts.step : sharedPlayhead;
+    const pat = {};
+    for (const n of trackOrder) {
+      const p = patterns[n];
+      if (!p) continue;
+      ensureBanks(p);
+      ensurePatternFlags(p);
+      const live = liveBank(p);
+      pat[n] = {
+        kind: p.kind || 'float',
+        mode: p.mode,
+        swing: clampSwing(p.swing),
+        muted: !!p.muted,
+        solo: !!p.solo,
+        running: !!p.running,
+        gate: p.gate || '',
+        values: liveValuesForDump(p),
+        gates: live.gates.slice(0, 16),
+        probs: normalizeProbs(live.probs),
+      };
+    }
+    vscode.postMessage({
+      type: 'transportDump',
+      data: {
+        masterBpm: masterBpm,
+        syncClocks: syncClocks,
+        swingEnabled: swingEnabled,
+        sharedPlayhead: step,
+        running: running,
+        trackOrder: trackOrder.slice(),
+        patterns: pat,
+      },
+    });
+  }
+
+  let dumpTimer = null;
+  function dumpTransportSoon() {
+    if (!useChuckClock()) return;
+    if (dumpTimer) clearTimeout(dumpTimer);
+    dumpTimer = setTimeout(() => {
+      dumpTimer = null;
+      dumpTransport();
+    }, 50);
+  }
+
   function clamp(v, min, max, quant) {
     let x = Math.max(min, Math.min(max, v));
     if (quant >= 1) x = Math.round(x);
@@ -223,6 +307,7 @@
     ensureBanks(p);
     p.activeBank = standbyBankId(p);
     p.queued = null;
+    setEditBank(p, p.activeBank);
   }
 
   /** Apply queued bank when a 16-step cycle wraps. */
@@ -230,6 +315,7 @@
     if (!p || !p.queued) return false;
     p.activeBank = p.queued;
     p.queued = null;
+    setEditBank(p, p.activeBank);
     return true;
   }
 
@@ -367,6 +453,7 @@
     trackOrder = trackOrder.filter((n) => n !== name);
     maybeStopMaster();
     persist();
+    dumpTransportSoon();
     render();
   }
 
@@ -442,8 +529,19 @@
     setTimeout(() => el.classList.remove('fired'), 120);
   }
 
+  function safeBpm(bpm) {
+    const n = Number(bpm);
+    if (!Number.isFinite(n)) return masterBpm;
+    return Math.max(40, Math.min(200, n));
+  }
+
   function stepMsFor(bpm) {
-    return (60 / Math.max(40, bpm) / 4) * 1000;
+    return (60 / safeBpm(bpm) / 4) * 1000;
+  }
+
+  function ensureTrackBpm(p) {
+    if (!p) return;
+    p.bpm = safeBpm(p.bpm);
   }
 
   function clearSwingFire(name) {
@@ -505,12 +603,36 @@
 
   function maybeStopMaster() {
     const any = trackOrder.some((n) => patterns[n] && patterns[n].running);
-    if (!any) stopMasterTimer();
+    if (!any) {
+      stopMasterTimer();
+      if (useChuckClock()) {
+        dumpTransport({ running: false });
+        publishTransport({ running: false });
+      }
+    } else if (useChuckClock()) {
+      dumpTransportSoon();
+    }
   }
 
   function startMasterTimer(fireNow) {
     stopMasterTimer();
     stopAllIndependent();
+    if (useChuckClock()) {
+      // ChucK transport owns 16ths — dump patterns and run flag.
+      for (const name of trackOrder) {
+        const p = patterns[name];
+        if (p && p.running) {
+          p.playhead = sharedPlayhead;
+          updatePlayhead(name);
+        }
+      }
+      dumpTransport({
+        running: anyTrackRunning(),
+        step: sharedPlayhead,
+      });
+      publishTransport({ tick: false });
+      return;
+    }
     const ms = stepMsFor(masterBpm);
     if (fireNow !== false) {
       for (const name of trackOrder) {
@@ -521,6 +643,7 @@
           updatePlayhead(name);
         }
       }
+      publishTransport({ tick: true, step: sharedPlayhead });
     } else {
       for (const name of trackOrder) {
         const p = patterns[name];
@@ -543,6 +666,7 @@
         updatePlayhead(name);
       }
       if (wrapped) refreshBankChromeAll();
+      publishTransport({ tick: true, step: sharedPlayhead });
     }, ms);
   }
 
@@ -552,6 +676,11 @@
     if (syncClocks) {
       stopClock(name);
       p.bpm = masterBpm;
+      if (useChuckClock()) {
+        sharedPlayhead = p.playhead || 0;
+        startMasterTimer(true);
+        return;
+      }
       if (!masterTimer) {
         sharedPlayhead = p.playhead || 0;
         startMasterTimer();
@@ -563,6 +692,7 @@
       return;
     }
     stopClock(name);
+    ensureTrackBpm(p);
     const ms = stepMsFor(p.bpm);
     emitStep(name, p.playhead);
     updatePlayhead(name);
@@ -675,6 +805,7 @@
       if (!probDragging) return;
       probDragging = false;
       persist();
+      if (!p.running || p.editBank === p.activeBank) dumpTransportSoon();
       if (moved) {
         e.preventDefault();
         e.stopPropagation();
@@ -687,14 +818,12 @@
         moved = false;
         return;
       }
-      // While playing, edit the live bank so pads match what you hear
-      if (p.running && p.editBank !== p.activeBank) {
-        setEditBank(p, p.activeBank);
-      }
       ensureBanks(p);
       p.gates[i] = p.gates[i] > 0.5 ? 0 : 1;
       paintGateProb(gate, p, i);
       persist();
+      // Only reload transport when editing the live bank (what ChucK plays).
+      if (!p.running || p.editBank === p.activeBank) dumpTransportSoon();
     });
   }
 
@@ -775,6 +904,7 @@
     pitch.addEventListener('pointerup', () => {
       dragging = false;
       persist();
+      if (!p.running || p.editBank === p.activeBank) dumpTransportSoon();
     });
 
     el.appendChild(num);
@@ -832,6 +962,7 @@
       gateSel.addEventListener('change', () => {
         p.gate = gateSel.value || '';
         persist();
+        dumpTransportSoon();
       });
       gatePick.appendChild(gateSel);
       bar.appendChild(gatePick);
@@ -886,6 +1017,7 @@
       p.muted = !p.muted;
       updatePlayhead(name);
       persist();
+      dumpTransportSoon();
     });
 
     const btnSolo = document.createElement('button');
@@ -897,6 +1029,7 @@
       p.solo = !p.solo;
       for (const n of trackOrder) updatePlayhead(n);
       persist();
+      dumpTransportSoon();
     });
 
     bar.appendChild(btnRun);
@@ -959,6 +1092,7 @@
       persist();
       refreshBankChrome(name);
       updatePlayhead(name);
+      dumpTransportSoon();
     });
 
     bar.appendChild(btnDup);
@@ -975,7 +1109,8 @@
       bpmIn.max = '200';
       bpmIn.value = String(p.bpm);
       bpmIn.addEventListener('change', () => {
-        p.bpm = Math.max(40, Math.min(200, Number(bpmIn.value) || 120));
+        p.bpm = safeBpm(Number(bpmIn.value) || masterBpm);
+        bpmIn.value = String(p.bpm);
         if (p.running) startClock(name);
         persist();
       });
@@ -999,6 +1134,7 @@
       p.swing = clampSwing((Number(swingIn.value) || 0) / 100);
       swingIn.value = String(Math.round(p.swing * 100));
       persist();
+      dumpTransportSoon();
     });
     swingLab.appendChild(swingIn);
     bar.appendChild(swingLab);
@@ -1050,7 +1186,9 @@
 
     if (hintEl) {
       hintEl.textContent =
-        (syncClocks ? 'Sync ON · master ' + masterBpm + ' BPM · ' : 'Independent clocks · ') +
+        (syncClocks
+          ? 'Sync ON · ChucK clock · ' + masterBpm + ' BPM · '
+          : 'Independent host clocks · ') +
         'scale ' +
         scaleName +
         ' · ' +
@@ -1069,15 +1207,24 @@
     stopMasterTimer();
     stopAllIndependent();
     const running = trackOrder.filter((n) => patterns[n] && patterns[n].running);
-    if (!running.length) return;
+    if (!running.length) {
+      dumpTransport({ running: false });
+      publishTransport({ running: false });
+      return;
+    }
     if (syncClocks) {
-      // Keep shared playhead unless caller already reset it (Run all)
       for (const n of running) {
         patterns[n].bpm = masterBpm;
         patterns[n].playhead = sharedPlayhead;
       }
       startMasterTimer(fireNow !== false);
     } else {
+      // Leaving ChucK clock — hard-stop transport, use host intervals
+      for (const n of running) {
+        ensureTrackBpm(patterns[n]);
+      }
+      dumpTransport({ running: false });
+      publishTransport({ running: false, bpm: masterBpm });
       for (const n of running) startClock(n);
     }
   }
@@ -1131,6 +1278,10 @@
       stopClock(name);
     }
     stopMasterTimer();
+    if (useChuckClock()) {
+      dumpTransport({ running: false });
+      publishTransport({ running: false });
+    }
   }
 
   function applyPatternFile(data) {
@@ -1238,6 +1389,10 @@
         stopClock(name);
       }
       stopMasterTimer();
+      if (useChuckClock()) {
+        dumpTransport({ running: false });
+        publishTransport({ running: false });
+      }
       for (const name of trackOrder) updatePlayhead(name);
       persist();
     });
@@ -1281,7 +1436,12 @@
         for (const name of trackOrder) {
           if (patterns[name]) patterns[name].bpm = masterBpm;
         }
-        if (masterTimer) startMasterTimer();
+        publishTransport({ bpm: masterBpm });
+        if (useChuckClock()) {
+          if (anyTrackRunning()) dumpTransportSoon();
+        } else if (masterTimer) {
+          startMasterTimer();
+        }
       }
       persist();
       render();
@@ -1299,6 +1459,8 @@
     swingEnableChk.addEventListener('change', () => {
       swingEnabled = !!swingEnableChk.checked;
       clearAllSwingFires();
+      publishTransport({ swingEnabled: swingEnabled });
+      if (useChuckClock() && anyTrackRunning()) dumpTransportSoon();
       persist();
       render();
     });
@@ -1317,6 +1479,51 @@
     }
     if (msg.type === 'patternLoaded' && msg.data) {
       applyPatternFile(msg.data);
+      return;
+    }
+    if (msg.type === 'playhead') {
+      // Sync OFF: each track owns its playhead via host setInterval — ignore ChucK.
+      if (!useChuckClock()) return;
+      const step = ((Math.round(msg.step) % 16) + 16) % 16;
+      const prev = sharedPlayhead;
+      sharedPlayhead = step;
+      if (msg.wrapped || (prev === 15 && step === 0)) {
+        let swapped = false;
+        for (const name of trackOrder) {
+          const p = patterns[name];
+          if (!p || !p.running) continue;
+          if (applyQueueOnWrap(p)) swapped = true;
+        }
+        if (swapped) {
+          refreshBankChromeAll();
+          dumpTransport({ step: 0, running: true });
+        }
+      }
+      for (const name of trackOrder) {
+        const p = patterns[name];
+        if (!p) continue;
+        if (p.running) p.playhead = step;
+        updatePlayhead(name);
+      }
+      return;
+    }
+    if (msg.type === 'bridgeReady') {
+      publishTransport({ bpm: masterBpm, step: sharedPlayhead });
+      if (useChuckClock() && anyTrackRunning()) dumpTransport();
+      return;
+    }
+    if (msg.type === 'setMasterBpm' && typeof msg.bpm === 'number') {
+      masterBpm = safeBpm(msg.bpm);
+      if (masterBpmIn) masterBpmIn.value = String(masterBpm);
+      if (syncClocks) {
+        for (const name of trackOrder) {
+          if (patterns[name]) patterns[name].bpm = masterBpm;
+        }
+        publishTransport({ bpm: masterBpm });
+        if (useChuckClock() && anyTrackRunning()) dumpTransportSoon();
+      }
+      persist();
+      return;
     }
   });
 

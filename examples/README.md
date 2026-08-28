@@ -4,6 +4,72 @@ Bundled **module library** shipped with the extension. To copy into your own pro
 
 Patches for the **ChucK Live** extension. For install / commands, see the [root README](../README.md).
 
+Every `.ck` file here is heavily commented — read them as tutorials. Infrastructure stubs live in [`chuck/`](../chuck/) (`bridge.ck`, `transport.ck`, `meter.ck`).
+
+## Annotation cookbook
+
+Minimal recipe for a live-controllable patch:
+
+```chuck
+// 1) Annotate globals (line directly above). Extension scans all loaded .ck files.
+// @knob min=0 max=1 step=0.01 default=0.3
+global float gain;
+
+// @slider min=110 max=880 step=1 default=440
+// @seq mode=raw                    ← optional: Sequencer pitch track (Hz)
+global float freq;
+
+// @button
+global Event bang;                // Knobs sends click → bridge broadcasts Event
+
+// 2) Seed values (used until OSC bridge connects on Start VM)
+0.3 => gain;
+440.0 => freq;
+
+// 3) Audio graph
+SinOsc osc => Gain g => dac;      // or => rackBus when using master.ck
+
+// 4) Copy globals → UGens in a sporked loop (bridge only writes globals)
+spork ~ follow();
+while (true) 10::ms => now;       // main shred must not exit
+
+fun void follow() {
+  while (true) {
+    gain => g.gain;
+    freq => osc.freq;
+    10::ms => now;
+  }
+}
+```
+
+| Tag | UI | ChucK type | Notes |
+|-----|-----|------------|-------|
+| `@knob` | rotary | `float` or `int` | `min`, `max`, `step`, `default` |
+| `@slider` | vertical | `float` or `int` | same attrs as `@knob` |
+| `@button` | click | `Event` | handler: `bang => now;` |
+| `@seq` | Sequencer lane | `float` | `mode=raw` (Hz) or `mode=midi` (snaps to scale); optional `gate=my_gate` |
+| `@seqGate` | gate pads only | `Event` | drums / triggers — `dk_kick => now;` |
+
+**Gate drums** — never block the listener for the full envelope; `spork` the hit:
+
+```chuck
+// @seqGate
+global Event dk_kick;
+
+fun void onKick() {
+  while (true) {
+    dk_kick => now;       // wait only for the gate
+    spork ~ kickHit();    // sound runs in its own shred
+  }
+}
+```
+
+**Bus modules** — declare `global Gain rackBus;` (from `master.ck`), route `… => rackBus`, add `_ckLivePeak()` for Rack meters. See [`oscillators/sine.ck`](oscillators/sine.ck).
+
+**Transport** — when Sequencer Sync is on, read `live_stepDur` / `live_tick` for grid-locked timing ([`minibrute/voice.ck`](minibrute/voice.ck)).
+
+Behind the scenes: `bridge.ck` (OSC → globals), `transport.ck` (clock + patterns), `meter.ck` (VU → OSC). Reference stubs in [`chuck/`](../chuck/); running copies are auto-generated in `$TMPDIR`.
+
 ## Prerequisites
 
 1. **ChucK: Start VM** (uses `bin/chuck-pw` → `pw-jack chuck` when available).
@@ -113,7 +179,8 @@ global Event dk_kick;
 ## Sequencer cascade
 
 - One track per float or `@seqGate` Event; independent Run/Stop  
-- **Sync clocks** + Master BPM = shared 16ths  
+- **Sync clocks** (default ON) = **ChucK-owned** 16th clock (`transport` shred); Master BPM shared  
+- **Sync OFF** = independent host-side clocks per track (legacy)  
 - **Scale** snaps MIDI tracks (default phrygian)  
 - Gate tracks: pads only (drums)
 - **A/B banks** per track: **Dup→standby** copies the live bank; edit the other tab while A plays; **Queue** swaps at the end of the 16-step cycle; **Swap now** switches immediately  
@@ -121,6 +188,20 @@ global Event dk_kick;
 - **Probability**: Shift+drag a gate pad (opacity shows chance)  
 - **M / S**: mute or solo without stopping the clock (unlike Stop)  
 - **Save As… / Load…**: named JSON under `.chuck-live/patterns/`
+
+### Transport bus (`live_*`)
+
+Always declared by the OSC bridge (and driven by the transport shred when Sync is on):
+
+| Global | Type | Meaning |
+|--------|------|---------|
+| `live_bpm` | float | Master BPM |
+| `live_step` | int | Current 16th index 0–15 |
+| `live_stepDur` | float | Seconds per 16th (`60/bpm/4`) |
+| `live_tick` | Event | Bang each master step |
+| `live_running` | int | 1 while transport is running |
+
+Example shreds can follow the grid, e.g. MiniBrute `onGate` holds `0.9 * live_stepDur`. Drum envelope decay knobs stay in ms (musical length, independent of the grid).
 
 ## Not yet
 

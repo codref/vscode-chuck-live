@@ -76,6 +76,7 @@ Unannotated globals are ignored. The extension generates a temp OSC bridge shred
 - **Shreds:** **ChucK Session** — add / reload / remove / drag-reorder (UI + rack order only).
 - **Knobs:** **ChucK Live** sidebar (alone) for the active `.ck`; UDP OSC (default port 9000) → bridge → shared `global`s.
 - **Meter:** dac L/R peaks → meter shred → UDP OSC (default port 9001) → Session **Meter** view.
+- **Transport:** managed shred owns Sync-on sequencer clock; publishes `live_*` globals; playhead OSC `/chuck/live_playhead` on the meter port.
 - **Rack / Sequencer:** editor panels, opened from the Shreds toolbar.
 
 ## Settings
@@ -110,8 +111,8 @@ bin/chuck-pw --probe
 - Start / Stop VM (Session **Control**)
 - Add Current File / Reload Shred / Remove Shred / Remove All — inline actions on the Shreds list, CodeLens **Load** / **Reload**, editor title icons
 - Refresh Status / Refresh Knobs
-- **Open Rack** — full-page Eurorack modules for loaded shreds
-- **Open Sequencer** — 16-step cascade (`@knob`/`@seq`/`@seqGate`): A/B banks, optional swing (header toggle, off by default), step probability (Shift+drag gate), mute/solo, **Save As… / Load…** → `.chuck-live/patterns/<name>.json`
+- **Open Rack** — full-page Eurorack modules for loaded shreds; **sequencer** faceplate with master BPM (`live_bpm`) when VM is running
+- **Open Sequencer** — 16-step cascade (`@knob`/`@seq`/`@seqGate`): A/B banks, optional swing (header toggle, off by default), step probability (Shift+drag gate), mute/solo, **Save As… / Load…** → `.chuck-live/patterns/<name>.json`. **Sync ON** uses a ChucK-owned transport shred (`live_bpm` / `live_step` / `live_stepDur` / `live_tick`); Sync OFF keeps independent host clocks.
 - **Init Project Library** — copy the bundled module library into your workspace (`chuck/` by default) and deploy AI guides (`AGENTS.md`, Cursor rule, Copilot instructions)
 - **Re-init Project Library (force)** — replace an existing library and refresh AI guides (full preset wipes the library folder first)
-- **Meter** (ChucK Session) — L/R peak VU bars; auto-loaded with Start VM
+- **Meter** (ChucK Session) — L/R peak VU bars; auto-loaded with Start VM (with bridge + transport)

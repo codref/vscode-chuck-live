@@ -1,4 +1,7 @@
-// oscillators/fm.ck — 2-op FM into rackBus (load master.ck first).
+// oscillators/fm.ck — two-operator FM synthesis into rackBus (load master.ck first).
+//
+// Modulator (mod) does not connect to dac — it only affects carrier frequency.
+// `mod.last()` reads the previous modulator sample for the FM equation.
 
 global Gain rackBus;
 global Gain fm_meter;
@@ -9,16 +12,16 @@ global float fm_meter_p;
 global float fm_amp;
 
 // @slider min=40 max=800 step=1 default=110
-global float fm_car;
+global float fm_car;              // carrier base frequency (Hz)
 
 // @knob min=0.25 max=8 step=0.01 default=2
-global float fm_ratio;
+global float fm_ratio;            // modulator freq = carrier × ratio
 
 // @slider min=0 max=800 step=1 default=120
-global float fm_index;
+global float fm_index;            // modulation depth (Hz-ish scaling)
 
 // @knob min=0 max=1 step=0.01 default=0.2
-global float fm_fb;
+global float fm_fb;               // feedback — scales index for harsher timbres
 
 0.15 => fm_amp;
 110.0 => fm_car;
@@ -26,7 +29,7 @@ global float fm_fb;
 120.0 => fm_index;
 0.2 => fm_fb;
 
-SinOsc mod => blackhole;
+SinOsc mod => blackhole;          // modulator runs but output is discarded
 SinOsc car => fm_meter => rackBus;
 0.0 => car.gain;
 0.0 => mod.gain;
@@ -50,11 +53,11 @@ fun void follow() {
     fm_car => float c;
     c * fm_ratio => float mfreq;
     mfreq => mod.freq;
-    // classic FM: car.freq = carrier + mod * index
-    // light feedback: feed last car sample-ish via mod depth scaling
+    // classic FM: car.freq = carrier + mod × index
+    // light feedback: boost index when fm_fb > 0
     (fm_index + fm_fb * fm_index) => float idx;
     1.0 => mod.gain;
-    c + mod.last() * idx => car.freq;
+    c + mod.last() * idx => car.freq;   // per-sample FM — run fast (1 ms loop)
     1::ms => now;
   }
 }

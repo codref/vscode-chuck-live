@@ -1,6 +1,12 @@
 // minibrute/voice.ck — MiniBrute-inspired monosynth into rackBus.
 // Load order: oscillators/master.ck → voice.ck → out/dac-out.ck (or fx/bus-fx.ck)
-// Sequencer: bind mb_noteHz (midi) + gate mb_gate.
+//
+// Sequencer tracks (from annotations):
+//   mb_noteHz — `// @seq mode=midi` → pitch snapped to scale; values are Hz
+//   mb_gate   — `// @seqGate` → note on/off; hold length uses transport bus
+//
+// Transport globals (`live_*`) are always declared in the OSC bridge. When Sync
+// is ON, the transport shred sets live_stepDur = seconds per 16th at master BPM.
 
 global Gain rackBus;
 global Gain voice_meter;
@@ -8,12 +14,16 @@ global float voice_meter_p;
 0.0 => voice_meter_p;
 
 // @seq mode=midi min=24 max=84 step=1 default=48 gate=mb_gate
-global float mb_noteHz;
+global float mb_noteHz;           // pitch track; gate= ties note length to mb_gate Event
 // @seqGate
-global Event mb_gate;
+global Event mb_gate;             // sequencer fires this on each active step
+
+// Sequencer transport bus (written by ChucK Live bridge / transport shred)
+global float live_stepDur;        // seconds per 16th — use for musically timed gates
+0.125 => live_stepDur;            // fallback: one 16th at 120 BPM before transport starts
 
 // @knob min=0 max=1 step=0.01 default=0.35
-global float mb_saw;
+global float mb_saw;              // oscillator mix levels
 // @knob min=0 max=1 step=0.01 default=0.25
 global float mb_square;
 // @knob min=0 max=1 step=0.01 default=0.1
@@ -38,14 +48,14 @@ global float mb_sus;
 global float mb_rel;
 
 // @knob min=0.05 max=20 step=0.01 default=4
-global float mb_lfoRate;
+global float mb_lfoRate;          // filter + pitch wobble rate
 // @knob min=0 max=1 step=0.01 default=0.15
 global float mb_lfoAmt;
 
 // @knob min=0 max=1 step=0.01 default=0.2
-global float mb_metal;
+global float mb_metal;            // pre-filter drive ("metalizer")
 // @knob min=0 max=1 step=0.01 default=0.25
-global float mb_brute;
+global float mb_brute;            // post-filter drive
 
 // @knob min=0 max=0.8 step=0.01 default=0.4
 global float mb_amp;
@@ -81,8 +91,8 @@ env.set(5::ms, 120::ms, 0.55, 200::ms);
 1800 => flt.freq;
 3 => flt.Q;
 
-spork ~ follow();
-spork ~ onGate();
+spork ~ follow();                 // knobs + seq pitch → synth
+spork ~ onGate();                 // mb_gate → envelope timing
 spork ~ _ckLivePeak();
 while (true) 20::ms => now;
 
@@ -103,19 +113,19 @@ fun void follow() {
     mb_noise => nz.gain;
     mb_sub * 0.7 => sub.gain;
 
-    mb_noteHz => float f;
+    mb_noteHz => float f;         // sequencer writes Hz each step (after scale snap)
     now / second => float t;
     f * (1.0 + Math.sin(2.0 * Math.PI * mb_lfoRate * t) * mb_lfoAmt * 0.05) => float pf;
     pf => saw.freq;
     pf => sqr.freq;
     pf => tri.freq;
-    pf * 0.5 => sub.freq;
+    pf * 0.5 => sub.freq;         // sub osc one octave down
 
     mb_cutoff * (1.0 + Math.sin(2.0 * Math.PI * mb_lfoRate * t) * mb_lfoAmt * 0.35)
       => flt.freq;
     mb_res => flt.Q;
 
-    // soft metalizer / brute: gain into the filter stage
+    // soft metalizer / brute: extra gain into filter and output stages
     1.0 + mb_metal * 4.0 => fold.gain;
     1.0 + mb_brute * 3.0 => drive.gain;
     mb_amp => out.gain;
@@ -130,10 +140,11 @@ fun void follow() {
 
 fun void onGate() {
   while (true) {
-    mb_gate => now;
+    mb_gate => now;               // note on from sequencer
     env.keyOn();
-    // hold roughly one 16th at 120bpm default
-    80::ms => now;
+    // Hold ~90% of one 16th from the shared transport — stays in sync with BPM
+    Math.max(0.01, live_stepDur) * 0.9 => float hold;
+    hold::second => now;
     env.keyOff();
   }
 }

@@ -2,7 +2,12 @@ import * as vscode from 'vscode';
 import { getConfig } from './config';
 import { OscClient } from './oscClient';
 import { ShredOps } from './shredOps';
-import { writeBridgeFile } from './bridgeGen';
+import { writeBridgeFile, LIVE_TRANSPORT } from './bridgeGen';
+import {
+  writeTransportFile,
+  TransportTrack,
+  TransportSpec,
+} from './transportGen';
 import {
   collectAnnotations,
   collectSeqTargets,
@@ -10,12 +15,39 @@ import {
 
 const PATTERN_NAME_RE = /^[a-zA-Z0-9._-]+$/;
 
+export interface SeqTransportDump {
+  masterBpm?: number;
+  syncClocks?: boolean;
+  swingEnabled?: boolean;
+  sharedPlayhead?: number;
+  running?: boolean;
+  trackOrder?: string[];
+  patterns?: Record<
+    string,
+    {
+      kind?: string;
+      mode?: string;
+      swing?: number;
+      muted?: boolean;
+      solo?: boolean;
+      running?: boolean;
+      gate?: string;
+      values?: number[];
+      gates?: number[];
+      probs?: number[];
+    }
+  >;
+}
+
 /**
  * Cascade sequencer: float lanes + gate-only Event tracks.
- * Host/UI owns the clock; each tick writes OSC.
+ * Sync-on: ChucK transport owns the clock; UI dumps patterns + mirrors playhead.
+ * Sync-off: host JS clock still fires OSC per track (independent BPMs).
  */
 export class SeqPanel {
   private panel: vscode.WebviewPanel | undefined;
+  private transportDumpTimer: ReturnType<typeof setTimeout> | undefined;
+  private lastPlayheadStep = -1;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -24,7 +56,12 @@ export class SeqPanel {
     private readonly onBridgeNeeded: (
       bridgePath: string,
       source?: string
-    ) => Promise<boolean | void>
+    ) => Promise<boolean | void>,
+    private readonly onTransportNeeded: (
+      transportPath: string,
+      source?: string
+    ) => Promise<boolean | void>,
+    private readonly onLiveBpmFromSeq?: (bpm: number) => void
   ) {}
 
   open(): void {
@@ -60,6 +97,12 @@ export class SeqPanel {
     return !!this.panel;
   }
 
+  /** Update master BPM from rack or host (does not re-notify rack). */
+  setMasterBpm(bpm: number): void {
+    const safe = Math.max(40, Math.min(200, bpm));
+    this.panel?.webview.postMessage({ type: 'setMasterBpm', bpm: safe });
+  }
+
   async ensureBridge(): Promise<boolean> {
     const anns = collectAnnotations(this.shredOps);
     const { oscPort } = getConfig();
@@ -76,6 +119,38 @@ export class SeqPanel {
     }
   }
 
+  /** Seed default live_* values after Start VM. */
+  seedTransportDefaults(bpm = 120): void {
+    const { oscPort } = getConfig();
+    const host = '127.0.0.1';
+    const stepDur = 60 / Math.max(40, bpm) / 4;
+    this.osc.sendFloat(host, oscPort, `/chuck/${LIVE_TRANSPORT.bpm}`, bpm);
+    this.osc.sendFloat(host, oscPort, `/chuck/${LIVE_TRANSPORT.step}`, 0);
+    this.osc.sendFloat(host, oscPort, `/chuck/${LIVE_TRANSPORT.stepDur}`, stepDur);
+    this.osc.sendFloat(host, oscPort, `/chuck/${LIVE_TRANSPORT.running}`, 0);
+    this.osc.sendInt(host, oscPort, `/chuck/${LIVE_TRANSPORT.swing}`, 0);
+  }
+
+  /** Handle /chuck/live_playhead from the transport shred (Sync ON only). */
+  onPlayheadOsc(step: number, running: number): void {
+    if (!this.panel) {
+      return;
+    }
+    // Host independent clocks own the UI playhead when Sync is off.
+    if (running <= 0.5) {
+      return;
+    }
+    const s = ((Math.round(step) % 16) + 16) % 16;
+    const wrapped = this.lastPlayheadStep === 15 && s === 0;
+    this.lastPlayheadStep = s;
+    this.panel.webview.postMessage({
+      type: 'playhead',
+      step: s,
+      running: running > 0.5,
+      wrapped,
+    });
+  }
+
   pushTargets(): void {
     if (!this.panel) {
       return;
@@ -84,6 +159,9 @@ export class SeqPanel {
   }
 
   dispose(): void {
+    if (this.transportDumpTimer) {
+      clearTimeout(this.transportDumpTimer);
+    }
     this.panel?.dispose();
     this.panel = undefined;
   }
@@ -139,7 +217,6 @@ export class SeqPanel {
     try {
       await vscode.workspace.fs.createDirectory(dir);
     } catch {
-      // exists or parent created
       try {
         await vscode.workspace.fs.createDirectory(
           vscode.Uri.joinPath(this.workspaceRoot()!, '.chuck-live')
@@ -246,6 +323,153 @@ export class SeqPanel {
     }
   }
 
+  private publishTransportBus(msg: {
+    bpm?: number;
+    step?: number;
+    running?: boolean;
+    tick?: boolean;
+    swingEnabled?: boolean;
+  }): void {
+    const { oscPort } = getConfig();
+    const host = '127.0.0.1';
+    if (msg.bpm !== undefined) {
+      const bpm = Math.max(40, Math.min(200, msg.bpm));
+      const stepDur = 60 / bpm / 4;
+      this.osc.sendFloat(host, oscPort, `/chuck/${LIVE_TRANSPORT.bpm}`, bpm);
+      this.osc.sendFloat(
+        host,
+        oscPort,
+        `/chuck/${LIVE_TRANSPORT.stepDur}`,
+        stepDur
+      );
+    }
+    if (msg.step !== undefined) {
+      this.osc.sendFloat(
+        host,
+        oscPort,
+        `/chuck/${LIVE_TRANSPORT.step}`,
+        msg.step
+      );
+    }
+    if (msg.running !== undefined) {
+      this.osc.sendFloat(
+        host,
+        oscPort,
+        `/chuck/${LIVE_TRANSPORT.running}`,
+        msg.running ? 1 : 0
+      );
+    }
+    if (msg.swingEnabled !== undefined) {
+      this.osc.sendInt(
+        host,
+        oscPort,
+        `/chuck/${LIVE_TRANSPORT.swing}`,
+        msg.swingEnabled ? 1 : 0
+      );
+    }
+    if (msg.tick) {
+      this.osc.sendInt(host, oscPort, `/chuck/${LIVE_TRANSPORT.tick}`, 1);
+    }
+  }
+
+  private buildTransportSpec(dump: SeqTransportDump): TransportSpec {
+    const { meterPort } = getConfig();
+    const bpm = Math.max(40, Math.min(200, dump.masterBpm ?? 120));
+    const step = dump.sharedPlayhead ?? 0;
+    const order = dump.trackOrder ?? [];
+    const patterns = dump.patterns ?? {};
+    const tracks: TransportTrack[] = [];
+
+    for (const name of order) {
+      const p = patterns[name];
+      if (!p) {
+        continue;
+      }
+      const kind = p.kind === 'gate' ? 'gate' : 'float';
+      let values = (p.values ?? []).slice(0, 16);
+      while (values.length < 16) {
+        values.push(0);
+      }
+      if (kind === 'float' && p.mode === 'midi') {
+        values = values.map((v) => midiToHz(v));
+      }
+      tracks.push({
+        name,
+        kind,
+        gate: p.gate || undefined,
+        muted: !!p.muted,
+        solo: !!p.solo,
+        swing: typeof p.swing === 'number' ? p.swing : 0,
+        running: !!p.running,
+        gates: p.gates ?? [],
+        values,
+        probs: p.probs ?? [],
+      });
+    }
+
+    return {
+      bpm,
+      step,
+      running: !!dump.running,
+      swingEnabled: !!dump.swingEnabled,
+      meterPort,
+      tracks,
+    };
+  }
+
+  private buildStoppedTransportSpec(dump?: SeqTransportDump): TransportSpec {
+    const { meterPort } = getConfig();
+    const bpm = Math.max(
+      40,
+      Math.min(200, dump?.masterBpm ?? 120)
+    );
+    return {
+      bpm,
+      step: dump?.sharedPlayhead ?? 0,
+      running: false,
+      swingEnabled: false,
+      meterPort,
+      tracks: [],
+    };
+  }
+
+  private async applyTransportDump(dump: SeqTransportDump): Promise<void> {
+    const chuckOwnsClock = dump.syncClocks !== false;
+    this.publishTransportBus({
+      bpm: dump.masterBpm,
+      step: dump.sharedPlayhead,
+      running: chuckOwnsClock ? dump.running : false,
+      swingEnabled: dump.swingEnabled,
+    });
+
+    // Sync ON → pattern player; Sync OFF → idle transport (host fires OSC).
+    const spec = chuckOwnsClock
+      ? this.buildTransportSpec(dump)
+      : this.buildStoppedTransportSpec(dump);
+    const file = writeTransportFile(spec);
+    try {
+      await this.onTransportNeeded(file.path, file.source);
+    } catch (err) {
+      console.warn('transport reload skipped:', err);
+    }
+  }
+
+  private scheduleTransportDump(dump: SeqTransportDump): void {
+    if (this.transportDumpTimer) {
+      clearTimeout(this.transportDumpTimer);
+      this.transportDumpTimer = undefined;
+    }
+    // Stop / sync-off must not wait on debounce — avoids double-firing with host clock.
+    if (dump.syncClocks === false || dump.running === false) {
+      void this.applyTransportDump(dump);
+      return;
+    }
+    this.transportDumpTimer = setTimeout(() => {
+      this.transportDumpTimer = undefined;
+      void this.applyTransportDump(dump);
+    }, 40);
+  }
+
   private async onMessage(msg: {
     type: string;
     target?: string;
@@ -255,6 +479,11 @@ export class SeqPanel {
     value?: number;
     gateOn?: boolean;
     data?: unknown;
+    bpm?: number;
+    step?: number;
+    running?: boolean;
+    tick?: boolean;
+    swingEnabled?: boolean;
   }): Promise<void> {
     if (msg.type === 'requestSavePattern') {
       await this.handleSavePattern(msg.data);
@@ -265,8 +494,26 @@ export class SeqPanel {
       return;
     }
 
-    // Fire must be synchronous — awaiting ensureBridge serialized every step
-    // behind the playhead and staggered multi-track OSC.
+    if (msg.type === 'transport') {
+      this.publishTransportBus({
+        bpm: msg.bpm,
+        step: msg.step,
+        running: msg.running,
+        tick: msg.tick,
+        swingEnabled: msg.swingEnabled,
+      });
+      if (msg.bpm !== undefined) {
+        this.onLiveBpmFromSeq?.(Math.max(40, Math.min(200, msg.bpm)));
+      }
+      return;
+    }
+
+    if (msg.type === 'transportDump' && msg.data) {
+      this.scheduleTransportDump(msg.data as SeqTransportDump);
+      return;
+    }
+
+    // Independent-clock path (sync off): host still fires per step.
     if (msg.type === 'fire' && msg.target !== undefined) {
       if (msg.gateOn === false) {
         return;
@@ -328,7 +575,7 @@ export class SeqPanel {
       <label class="bpm">Master BPM
         <input type="number" id="masterBpm" min="40" max="200" value="120" />
       </label>
-      <label class="pick sync">
+      <label class="pick sync" title="Sync ON = ChucK-owned clock; OFF = independent host clocks">
         <input type="checkbox" id="syncClocks" checked /> Sync clocks
       </label>
       <label class="pick sync" title="When off, all tracks fire on the straight grid">
@@ -342,7 +589,7 @@ export class SeqPanel {
       <button type="button" id="btnLoad" title="Load from .chuck-live/patterns/">Load…</button>
     </div>
   </header>
-  <p class="hint" id="hint">Tracks · scale lock (midi) · sync = shared 16ths</p>
+  <p class="hint" id="hint">Tracks · scale lock (midi) · sync = ChucK 16ths</p>
   <div id="tracks"></div>
   <script nonce="${nonce}" src="${js}?v=${bust}"></script>
 </body>

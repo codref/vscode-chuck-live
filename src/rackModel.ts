@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { Annotation, parseAnnotations } from './annotations';
+import { LIVE_TRANSPORT } from './bridgeGen';
 import { resolveChuckPath } from './chuckPaths';
 import { ShredOps, isFileModule } from './shredOps';
 
@@ -12,7 +13,17 @@ export interface RackModule {
   file: string;
   knobs: Annotation[];
   /** Hint UI for master filter module chrome. */
-  isMaster: boolean;
+  isMaster?: boolean;
+  /** Virtual sequencer / transport faceplate (live_bpm). */
+  isTransport?: boolean;
+}
+
+/** Wired-only shreds: stay loaded but are not rack faceplates. */
+export function isRackHiddenModule(file: string, title?: string): boolean {
+  return (
+    /(?:^|[/\\])dac-out\.ck$/i.test(file) ||
+    /^dac-out\.ck$/i.test(title ?? '')
+  );
 }
 
 /** Build rack modules from currently tracked shreds (skip bridge + spork children). */
@@ -23,15 +34,19 @@ export function buildModulesFromShreds(shredOps: ShredOps): RackModule[] {
     if (!isFileModule(shred.source, {
       isBridge: shred.isBridge,
       isMeter: shred.isMeter,
+      isTransport: shred.isTransport,
     })) {
       continue;
     }
     const file = resolveChuckPath(shred.source);
-    const knobs = annotationsForFile(file);
     const title =
       path.basename(file) ||
       path.basename(shred.source) ||
       `shred-${shred.id}`;
+    if (isRackHiddenModule(file, title)) {
+      continue;
+    }
+    const knobs = annotationsForFile(file);
     modules.push({
       id: shred.id,
       title,
@@ -51,6 +66,42 @@ export function buildModulesFromShreds(shredOps: ShredOps): RackModule[] {
   });
 
   return modules;
+}
+
+/** Virtual rack module for master tempo (`live_bpm` on the OSC bridge). */
+export function buildTransportRackModule(bpm = 120): RackModule {
+  const safe = Math.max(40, Math.min(200, bpm));
+  return {
+    id: -1,
+    title: 'sequencer',
+    file: 'chuck-live-transport',
+    isTransport: true,
+    knobs: [
+      {
+        kind: 'knob',
+        name: LIVE_TRANSPORT.bpm,
+        type: 'float',
+        ui: 'dial',
+        min: 40,
+        max: 200,
+        step: 1,
+        default: safe,
+      },
+    ],
+  };
+}
+
+/** User modules plus optional transport faceplate when the VM bridge is loaded. */
+export function buildRackModules(
+  shredOps: ShredOps,
+  liveBpm = 120
+): RackModule[] {
+  const user = buildModulesFromShreds(shredOps);
+  const vmUp = shredOps.list().some((s) => s.isBridge);
+  if (!vmUp) {
+    return user;
+  }
+  return [buildTransportRackModule(liveBpm), ...user];
 }
 
 function annotationsForFile(resolvedPath: string): Annotation[] {
