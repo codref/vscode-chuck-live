@@ -157,6 +157,11 @@ export class ChuckVm {
     return this.logText.length;
   }
 
+  /** VM log text appended since `mark`. */
+  logSince(mark: number): string {
+    return this.logText.slice(mark);
+  }
+
   /** Poll until VM log since `mark` matches `pred`, or timeout. */
   async waitLogSince(
     mark: number,

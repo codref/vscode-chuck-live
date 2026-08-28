@@ -1470,11 +1470,26 @@
     const msg = event.data;
     if (!msg || !msg.type) return;
     if (msg.type === 'targets') {
+      const prevNames = targets
+        .map((t) => t.name)
+        .sort()
+        .join('\0');
       targets = msg.targets || [];
       gateOptions = msg.gates || [];
+      const nextNames = targets
+        .map((t) => t.name)
+        .sort()
+        .join('\0');
+      const targetsChanged = prevNames !== nextNames;
       syncPreferredTracks();
       render();
-      resyncRunning(false);
+      if (targetsChanged) {
+        resyncRunning(anyTrackRunning());
+      } else if (useChuckClock() && anyTrackRunning()) {
+        // Bridge-only refresh — re-push live_* OSC, do not OTF-replace transport.
+        publishTransport({ bpm: masterBpm, step: sharedPlayhead });
+      }
+      // targets unchanged + not running → leave transport alone
       return;
     }
     if (msg.type === 'patternLoaded' && msg.data) {
@@ -1510,6 +1525,11 @@
     if (msg.type === 'bridgeReady') {
       publishTransport({ bpm: masterBpm, step: sharedPlayhead });
       if (useChuckClock() && anyTrackRunning()) dumpTransport();
+      return;
+    }
+    if (msg.type === 'bridgeReloaded') {
+      // Bridge OTF-replace only — re-push live_* OSC; do not reload transport (resets clock).
+      publishTransport({ bpm: masterBpm, step: sharedPlayhead });
       return;
     }
     if (msg.type === 'setMasterBpm' && typeof msg.bpm === 'number') {

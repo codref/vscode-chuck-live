@@ -35,6 +35,7 @@ export function buildModulesFromShreds(shredOps: ShredOps): RackModule[] {
       isBridge: shred.isBridge,
       isMeter: shred.isMeter,
       isTransport: shred.isTransport,
+      isModMatrix: shred.isModMatrix,
     })) {
       continue;
     }

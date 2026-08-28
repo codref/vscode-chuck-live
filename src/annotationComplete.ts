@@ -1,6 +1,15 @@
 import * as vscode from 'vscode';
 
-const TAGS = ['knob', 'slider', 'button', 'seq', 'seqGate'] as const;
+const TAGS = [
+  'knob',
+  'slider',
+  'button',
+  'seq',
+  'seqGate',
+  'modSource',
+  'modTarget',
+  'modRoute',
+] as const;
 type AnnTag = (typeof TAGS)[number];
 
 const RANGE_ATTRS = ['min', 'max', 'step', 'default'] as const;
@@ -11,16 +20,27 @@ const ATTRS: Record<AnnTag, readonly string[]> = {
   seq: [...RANGE_ATTRS, 'mode', 'gate'],
   button: [],
   seqGate: [],
+  modSource: ['label', 'bipolar'],
+  modTarget: ['label', 'unit', 'scale'],
+  modRoute: ['src', 'dst', 'default', 'depth'],
 };
 
 const ATTR_DOCS: Record<string, string> = {
   min: 'Lower bound (default 0, or 24 when `mode=midi`).',
   max: 'Upper bound (default 1, or 84 when `mode=midi`).',
   step: 'Increment (default 0.01, or 1 for int / midi).',
-  default: 'Initial value (defaults to `min`).',
+  default:
+    'Initial knob value (defaults to `min`), or `1` for `@modRoute` factory routes.',
   ui: '`dial` (default) or `slider`.',
   mode: '`raw` (default) or `midi`.',
   gate: 'Event name broadcast when a gated sequencer step runs.',
+  label: 'Jack label in the Mod Matrix panel.',
+  bipolar: '`1` for ±1 LFO-style sources; `0` for 0..1 envelope-style.',
+  unit: 'Destination unit hint (`hz`, `semitones`, etc.).',
+  scale: 'Multiplier applied in the patch `follow()` loop.',
+  src: 'Source jack label for `@modRoute`.',
+  dst: 'Destination jack label for `@modRoute`.',
+  depth: 'Mod amount 0..1 for `@modRoute` or live matrix cables.',
 };
 
 const VALUE_ENUMS: Record<string, readonly { value: string; doc: string }[]> = {
@@ -62,6 +82,21 @@ const TAG_META: Record<
     detail: 'global Event',
     doc: 'Prefer this Event as a gate-only Sequencer track (pads, no value lane).',
     snippet: 'seqGate',
+  },
+  modSource: {
+    detail: 'global float',
+    doc: 'Mod matrix source output. Patch writes the live value in `follow()`. Attrs: `label`, `bipolar`.',
+    snippet: 'modSource label=${1:LFO} bipolar=${2:1}',
+  },
+  modTarget: {
+    detail: 'global float',
+    doc: 'Mod matrix destination. Matrix writes `<name>` or `<knob>_mod`. Attrs: `label`, `unit`, `scale`.',
+    snippet: 'modTarget label=${1:Pitch}',
+  },
+  modRoute: {
+    detail: 'factory default route',
+    doc: 'Default mod patch when route src is 0. Standalone line: `// @modRoute src=LFO dst=Pitch default=1 depth=0.05`',
+    snippet: 'modRoute src=${1:LFO} dst=${2:Pitch} default=1 depth=${3:0.05}',
   },
 };
 

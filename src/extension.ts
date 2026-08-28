@@ -16,9 +16,15 @@ import { KnobsPanelProvider, collectAnnotations } from './knobsPanel';
 import { writeBridgeFile } from './bridgeGen';
 import { writeMeterFile, meterTapName, MeterTap } from './meterGen';
 import { writeTransportFile } from './transportGen';
+import { writeModMatrixFile } from './modGen';
+import {
+  collectModCodegen,
+  collectModTargetsForBridge,
+} from './modModel';
 import { buildModulesFromShreds } from './rackModel';
 import { RackPanel } from './rackPanel';
 import { SeqPanel } from './seqPanel';
+import { WiringPanelProvider } from './wiringPanel';
 import { runInitProjectCommand } from './projectInit';
 import { AnnotationCompletionProvider } from './annotationComplete';
 import { ControlTreeProvider } from './controlView';
@@ -60,7 +66,11 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!vm.running) {
       return false;
     }
-    return shredOps.loadBridge(bridgePath, source);
+    const changed = await shredOps.loadBridge(bridgePath, source);
+    if (changed) {
+      seq.republishTransportOsc();
+    }
+    return changed;
   };
 
   const knobs = new KnobsPanelProvider(
@@ -68,6 +78,13 @@ export function activate(context: vscode.ExtensionContext): void {
     osc,
     shredOps,
     loadBridge
+  );
+
+  const wiring = new WiringPanelProvider(
+    context.extensionUri,
+    osc,
+    shredOps,
+    context.workspaceState
   );
 
   let seq!: SeqPanel;
@@ -81,38 +98,44 @@ export function activate(context: vscode.ExtensionContext): void {
     (bpm) => seq.setMasterBpm(bpm)
   );
 
-  const reloadMeter = async (): Promise<void> => {
+  const reloadMeter = async (): Promise<boolean> => {
     if (!vm.running) {
-      return;
-    }
-    if (!shredOps.list().some((s) => s.isMeter)) {
-      return;
+      return false;
     }
     const { meterPort } = getConfig();
     const modules = buildModulesFromShreds(shredOps);
     const taps: MeterTap[] = modules
-      .filter((m) => !m.isMaster)
+      .filter((m) => !m.isMaster && !m.isTransport)
       .map((m) => ({
         shredId: m.id,
         name: meterTapName(m.file || m.title),
       }));
     const meterFile = writeMeterFile(meterPort, taps);
     try {
-      await shredOps.loadMeter(meterFile.path, meterFile.source);
-      rack.setPeakIds(taps.map((t) => t.shredId));
+      const loaded = await shredOps.loadMeter(meterFile.path, meterFile.source);
+      if (loaded) {
+        rack.setPeakIds(taps.map((t) => t.shredId));
+      }
+      return loaded;
     } catch (err) {
       vm.output.appendLine(`[warn] meter load: ${err}`);
+      return false;
     }
   };
 
   const loadTransport = async (
     transportPath: string,
-    source?: string
+    source?: string,
+    force?: boolean
   ): Promise<boolean> => {
     if (!vm.running) {
       return false;
     }
-    return shredOps.loadTransport(transportPath, source);
+    const loaded = await shredOps.loadTransport(transportPath, source, force);
+    if (loaded) {
+      vm.output.appendLine('[ok] transport reloaded');
+    }
+    return loaded;
   };
 
   const reloadTransportIdle = async (): Promise<void> => {
@@ -135,15 +158,77 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
 
-  let meterReloadTimer: ReturnType<typeof setTimeout> | undefined;
-  const reloadMeterSoon = (): void => {
-    if (meterReloadTimer !== undefined) {
-      clearTimeout(meterReloadTimer);
+  /** Coalesce bridge / meter / mod-matrix OTF reloads after shred list changes. */
+  let shredFxTimer: ReturnType<typeof setTimeout> | undefined;
+  let shredFxWantBridge = false;
+  let shredFxRunning = false;
+
+  const runShredSideEffects = async (): Promise<void> => {
+    if (!vm.running) {
+      shredFxWantBridge = false;
+      return;
     }
-    meterReloadTimer = setTimeout(() => {
-      meterReloadTimer = undefined;
-      void reloadMeter();
-    }, 80);
+    if (shredFxRunning) {
+      scheduleShredSideEffects(shredFxWantBridge);
+      return;
+    }
+    shredFxRunning = true;
+    const wantBridge = shredFxWantBridge;
+    shredFxWantBridge = false;
+    try {
+      if (wantBridge) {
+        await knobs.refresh(true);
+        if (seq.isOpen) {
+          seq.pushTargets();
+          if (seq.hasRunningTracks()) {
+            seq.republishTransportOsc();
+          }
+        }
+      }
+      await reloadMeter();
+      await reloadModMatrix();
+      refreshWiringUi();
+    } finally {
+      shredFxRunning = false;
+      if (shredFxWantBridge) {
+        scheduleShredSideEffects(true);
+      }
+    }
+  };
+
+  const scheduleShredSideEffects = (bridge = false): void => {
+    if (bridge) {
+      shredFxWantBridge = true;
+    }
+    if (shredFxTimer !== undefined) {
+      clearTimeout(shredFxTimer);
+    }
+    shredFxTimer = setTimeout(() => {
+      shredFxTimer = undefined;
+      void runShredSideEffects();
+    }, 120);
+  };
+
+  const reloadModMatrix = async (): Promise<boolean> => {
+    if (!vm.running) {
+      return false;
+    }
+    const codegen = collectModCodegen(shredOps, context.workspaceState);
+    if (!codegen.targets.length) {
+      return false;
+    }
+    const modFile = writeModMatrixFile(codegen);
+    try {
+      await shredOps.loadModMatrix(modFile.path, modFile.source);
+    } catch (err) {
+      vm.output.appendLine(`[warn] mod-matrix load: ${err}`);
+      return false;
+    }
+    return true;
+  };
+
+  const refreshWiringUi = (): void => {
+    void wiring.refresh();
   };
 
   seq = new SeqPanel(
@@ -157,7 +242,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const onMeterOsc = (msg: OscMessage): void => {
     if (msg.address === '/chuck/live_playhead' && msg.floats.length >= 1) {
-      seq.onPlayheadOsc(msg.floats[0], msg.floats[1] ?? 0);
+      const running =
+        msg.floats.length >= 2 ? msg.floats[1] : undefined;
+      seq.onPlayheadOsc(msg.floats[0], running);
     }
   };
   oscServer.on('message', onMeterOsc);
@@ -177,6 +264,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.window.registerTreeDataProvider('chuckLive.control', control),
     vscode.window.registerWebviewViewProvider(KnobsPanelProvider.viewType, knobs),
+    vscode.window.registerWebviewViewProvider(WiringPanelProvider.viewType, wiring),
     vscode.languages.registerCompletionItemProvider(
       { language: 'chuck' },
       new AnnotationCompletionProvider(),
@@ -192,6 +280,8 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!on) {
         shredOps.clearLocal();
         rack.resetMeter();
+        seq.resetTransportTracking();
+        void wiring.refresh();
       }
       control.refresh();
       if (rack.isOpen) {
@@ -202,8 +292,8 @@ export function activate(context: vscode.ExtensionContext): void {
       if (rack.isOpen) {
         void rack.refresh(false);
       }
-      void reloadMeterSoon();
-      // Do NOT call seq.ensureBridge here — loadBridge fires onDidChange and loops.
+      // User-shred changes need bridge + meter refresh (managed shreds use silent remember).
+      scheduleShredSideEffects(true);
     })
   );
 
@@ -224,17 +314,28 @@ export function activate(context: vscode.ExtensionContext): void {
 
       // Load OSC bridge from current annotations (may be empty at first).
       const anns = collectAnnotations(shredOps);
-      const bridge = writeBridgeFile(anns, oscPort);
-      try {
-        await shredOps.loadBridge(bridge.path, bridge.source);
-        vm.output.appendLine('[ok] bridge loaded');
-      } catch (err) {
-        vscode.window.showWarningMessage(`Bridge load: ${err}`);
-        vm.output.appendLine(`[warn] bridge load: ${err}`);
+      const modTargets = collectModTargetsForBridge(shredOps);
+      const bridge = writeBridgeFile(anns, oscPort, modTargets);
+      let bridgeOk = false;
+      for (let attempt = 1; attempt <= 2 && !bridgeOk; attempt++) {
+        try {
+          await shredOps.loadBridge(bridge.path, bridge.source);
+          bridgeOk = true;
+          vm.output.appendLine('[ok] bridge loaded');
+        } catch (err) {
+          if (attempt < 2) {
+            vm.output.appendLine(`[warn] bridge load retry: ${err}`);
+            await new Promise((r) => setTimeout(r, 200));
+          } else {
+            vscode.window.showWarningMessage(`Bridge load: ${err}`);
+            vm.output.appendLine(`[warn] bridge load: ${err}`);
+          }
+        }
       }
 
       try {
         await reloadTransportIdle();
+        seq.resetTransportTracking();
         seq.seedTransportDefaults(120);
         rack.setLiveBpm(120);
         vm.output.appendLine('[ok] transport loaded');
@@ -244,14 +345,29 @@ export function activate(context: vscode.ExtensionContext): void {
       }
 
       try {
-        await reloadMeter();
-        vm.output.appendLine('[ok] meter loaded');
+        const loaded = await reloadModMatrix();
+        if (loaded) {
+          vm.output.appendLine('[ok] mod-matrix loaded');
+        }
+      } catch (err) {
+        vscode.window.showWarningMessage(`Mod matrix load: ${err}`);
+        vm.output.appendLine(`[warn] mod-matrix load: ${err}`);
+      }
+
+      try {
+        const meterLoaded = await reloadMeter();
+        if (meterLoaded) {
+          vm.output.appendLine('[ok] meter loaded');
+        } else {
+          vm.output.appendLine('[warn] meter not loaded');
+        }
       } catch (err) {
         vscode.window.showWarningMessage(`Meter load: ${err}`);
         vm.output.appendLine(`[warn] meter load: ${err}`);
       }
 
       void knobs.refresh(false);
+      refreshWiringUi();
       if (rack.isOpen) {
         void rack.refresh(false);
       }
@@ -259,6 +375,7 @@ export function activate(context: vscode.ExtensionContext): void {
       control.refresh();
       void revealSessionViews();
       vm.output.appendLine('[ok] VM start complete');
+      await shredOps.reconcileShredIds();
       vscode.window.showInformationMessage('ChucK VM started');
     }),
 
@@ -278,12 +395,9 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         await shredOps.add(file);
-        await knobs.refresh(true);
+        scheduleShredSideEffects(true);
         if (rack.isOpen) {
           void rack.refresh(false);
-        }
-        if (seq.isOpen) {
-          void seq.ensureBridge().then(() => seq.pushTargets());
         }
         vscode.window.showInformationMessage(`Added ${path.basename(file)}`);
       } catch (err) {
@@ -305,6 +419,7 @@ export function activate(context: vscode.ExtensionContext): void {
           isBridge: item.isBridge,
           isMeter: item.isMeter,
           isTransport: item.isTransport,
+          isModMatrix: item.isModMatrix,
         })
       ) {
         file = item.source;
@@ -338,12 +453,9 @@ export function activate(context: vscode.ExtensionContext): void {
             `Reloaded shred #${existing}`
           );
         }
-        await knobs.refresh(true);
+        scheduleShredSideEffects(true);
         if (rack.isOpen) {
           void rack.refresh(false);
-        }
-        if (seq.isOpen) {
-          void seq.ensureBridge().then(() => seq.pushTargets());
         }
       } catch (err) {
         vscode.window.showErrorMessage(String(err));
@@ -369,12 +481,9 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       try {
         await shredOps.remove(id);
-        await knobs.refresh(!item?.isBridge);
+        scheduleShredSideEffects(!item?.isBridge);
         if (rack.isOpen) {
           void rack.refresh(false);
-        }
-        if (seq.isOpen && !item?.isTransport) {
-          void seq.ensureBridge().then(() => seq.pushTargets());
         }
       } catch (err) {
         vscode.window.showErrorMessage(String(err));
@@ -384,14 +493,11 @@ export function activate(context: vscode.ExtensionContext): void {
     cmd('chuckLive.removeAll', async () => {
       try {
         await shredOps.removeAll();
-        await knobs.refresh(true);
+        rack.resetMeter();
+        scheduleShredSideEffects(true);
         if (rack.isOpen) {
           void rack.refresh(false);
         }
-        if (seq.isOpen) {
-          void seq.ensureBridge().then(() => seq.pushTargets());
-        }
-        rack.resetMeter();
       } catch (err) {
         vscode.window.showErrorMessage(String(err));
       }
@@ -419,6 +525,12 @@ export function activate(context: vscode.ExtensionContext): void {
       seq.open();
     }),
 
+    cmd('chuckLive.showWiring', async () => {
+      await vscode.commands.executeCommand(
+        'workbench.view.extension.chuckLivePanel'
+      );
+    }),
+
     cmd('chuckLive.showSession', async () => {
       await revealSessionViews();
     }),
@@ -438,6 +550,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (doc.languageId === 'chuck' || doc.fileName.endsWith('.ck')) {
         // UI only — avoid bridge reload spam while sequencer runs
         void knobs.refresh(false);
+        refreshWiringUi();
         if (rack.isOpen) {
           void rack.refresh(false);
         }
@@ -446,6 +559,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.onDidChangeActiveTextEditor((ed) => {
       if (ed && (ed.document.languageId === 'chuck' || ed.document.fileName.endsWith('.ck'))) {
         void knobs.refresh(false);
+        refreshWiringUi();
       }
     })
   );

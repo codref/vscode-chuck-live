@@ -5,6 +5,7 @@ import { OscServer, OscMessage } from './oscServer';
 import { ShredOps } from './shredOps';
 import { buildRackModules, RackModule } from './rackModel';
 import { writeBridgeFile, LIVE_TRANSPORT } from './bridgeGen';
+import { collectModTargetsForBridge } from './modModel';
 import { collectAnnotations } from './knobsPanel';
 
 /**
@@ -98,7 +99,8 @@ export class RackPanel {
     if (reloadBridge) {
       const anns = collectAnnotations(this.shredOps);
       const { oscPort } = getConfig();
-      const bridge = writeBridgeFile(anns, oscPort);
+      const modTargets = collectModTargetsForBridge(this.shredOps);
+      const bridge = writeBridgeFile(anns, oscPort, modTargets);
       try {
         await this.onBridgeNeeded(bridge.path, bridge.source);
       } catch (err) {

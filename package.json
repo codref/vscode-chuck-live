@@ -2,7 +2,7 @@
   "name": "chuck-live",
   "displayName": "ChucK Live",
   "description": "Live coding for ChucK: VM control, shred load/unload, and annotated knobs over OSC",
-  "version": "0.3.14",
+  "version": "0.3.23",
   "publisher": "chuck-live",
   "engines": {
     "vscode": "^1.85.0"
@@ -15,7 +15,8 @@
     "onLanguage:chuck",
     "onView:chuckLive.control",
     "onView:chuckLive.sessionShreds",
-    "onView:chuckLive.knobs"
+    "onView:chuckLive.knobs",
+    "onView:chuckLive.wiring"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -121,6 +122,11 @@
         "command": "chuckLive.showSession",
         "title": "ChucK: Show Session (Shreds)",
         "icon": "$(list-unordered)"
+      },
+      {
+        "command": "chuckLive.showWiring",
+        "title": "ChucK: Show Mod Matrix",
+        "icon": "$(git-merge)"
       }
     ],
     "keybindings": [
@@ -149,6 +155,13 @@
           "title": "ChucK Session",
           "icon": "media/chuck-session-icon.svg"
         }
+      ],
+      "panel": [
+        {
+          "id": "chuckLivePanel",
+          "title": "ChucK Live",
+          "icon": "media/chuck-icon.svg"
+        }
       ]
     },
     "views": {
@@ -157,6 +170,13 @@
           "type": "webview",
           "id": "chuckLive.knobs",
           "name": "Knobs"
+        }
+      ],
+      "chuckLivePanel": [
+        {
+          "type": "webview",
+          "id": "chuckLive.wiring",
+          "name": "Mod Matrix"
         }
       ],
       "chuckLiveSession": [
@@ -177,7 +197,7 @@
       },
       {
         "view": "chuckLive.sessionShreds",
-        "contents": "No shreds loaded yet.\n\n1. **Start VM** from **Control** above\n2. **Add Current File** (`Ctrl+Shift+.`) from a `.ck` editor\n3. **Reload** (`Ctrl+.`) or the inline sync icon to hot-swap a loaded shred\n4. Drag shreds to reorder the list (and rack)\n\n[Open Rack](command:chuckLive.openRack)\n\n[Open Sequencer](command:chuckLive.openSequencer)"
+        "contents": "No shreds loaded yet.\n\n1. **Start VM** from **Control** above\n2. **Add Current File** (`Ctrl+Shift+.`) from a `.ck` editor\n3. **Reload** (`Ctrl+.`) or the inline sync icon to hot-swap a loaded shred\n4. Drag shreds to reorder the list (and rack)\n\n[Open Rack](command:chuckLive.openRack)\n\n[Open Sequencer](command:chuckLive.openSequencer)\n\n[Mod Matrix](command:chuckLive.showWiring)"
       }
     ],
     "menus": {
@@ -218,14 +238,19 @@
           "group": "navigation@2"
         },
         {
-          "command": "chuckLive.refreshStatus",
+          "command": "chuckLive.showWiring",
           "when": "view == chuckLive.sessionShreds",
           "group": "navigation@3"
         },
         {
-          "command": "chuckLive.removeAll",
+          "command": "chuckLive.refreshStatus",
           "when": "view == chuckLive.sessionShreds",
           "group": "navigation@4"
+        },
+        {
+          "command": "chuckLive.removeAll",
+          "when": "view == chuckLive.sessionShreds",
+          "group": "navigation@5"
         }
       ],
       "view/item/context": [

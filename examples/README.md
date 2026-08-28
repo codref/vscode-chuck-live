@@ -49,6 +49,11 @@ fun void follow() {
 | `@button` | click | `Event` | handler: `bang => now;` |
 | `@seq` | Sequencer lane | `float` | `mode=raw` (Hz) or `mode=midi` (snaps to scale); optional `gate=my_gate` |
 | `@seqGate` | gate pads only | `Event` | drums / triggers — `dk_kick => now;` |
+| `@modSource` | Mod Matrix source | `float` | Patch writes LFO/env value in `follow()`; `label`, `bipolar` |
+| `@modTarget` | Mod Matrix dest | `float` | Matrix writes offset; stack on `@knob` or dedicated `*_mod` global |
+| `@modRoute` | factory route | — | Standalone line: `src=LFO dst=Pitch default=1 depth=0.05` |
+
+**Mod matrix** — open the bottom-panel **Mod Matrix** view (`ChucK: Show Mod Matrix`). Click a source jack, then a destination to patch. Depth slider sets amount. When route `src` is `0`, the patch uses its internal `@modRoute` default. See [`minibrute/voice.ck`](minibrute/voice.ck).
 
 **Gate drums** — never block the listener for the full envelope; `spork` the hit:
 
@@ -202,7 +207,3 @@ Always declared by the OSC bridge (and driven by the transport shred when Sync i
 | `live_running` | int | 1 while transport is running |
 
 Example shreds can follow the grid, e.g. MiniBrute `onGate` holds `0.9 * live_stepDur`. Drum envelope decay knobs stay in ms (musical length, independent of the grid).
-
-## Not yet
-
-Free patch cables between arbitrary jacks.

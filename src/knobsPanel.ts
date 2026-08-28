@@ -11,6 +11,7 @@ import {
 import { getConfig } from './config';
 import { OscClient } from './oscClient';
 import { writeBridgeFile } from './bridgeGen';
+import { collectModTargetsForBridge } from './modModel';
 import { ShredOps, isFileModule } from './shredOps';
 import { resolveChuckPath } from './chuckPaths';
 
@@ -68,9 +69,10 @@ export class KnobsPanelProvider implements vscode.WebviewViewProvider {
       groups: this.groups,
     });
 
-    if (reloadBridge && this.shredOps.list().some((s) => s.isBridge)) {
+    if (reloadBridge) {
       const { oscPort } = getConfig();
-      const bridge = writeBridgeFile(this.allForBridge, oscPort);
+      const modTargets = collectModTargetsForBridge(this.shredOps);
+      const bridge = writeBridgeFile(this.allForBridge, oscPort, modTargets);
       try {
         await this.onBridgeNeeded(bridge.path, bridge.source);
       } catch (err) {
@@ -153,10 +155,12 @@ export function collectAnnotationSources(
       shred.isBridge ||
       shred.isMeter ||
       shred.isTransport ||
+      shred.isModMatrix ||
       !isFileModule(shred.source, {
         isBridge: shred.isBridge,
         isMeter: shred.isMeter,
         isTransport: shred.isTransport,
+        isModMatrix: shred.isModMatrix,
       })
     ) {
       continue;

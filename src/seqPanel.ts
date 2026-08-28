@@ -3,6 +3,7 @@ import { getConfig } from './config';
 import { OscClient } from './oscClient';
 import { ShredOps } from './shredOps';
 import { writeBridgeFile, LIVE_TRANSPORT } from './bridgeGen';
+import { collectModTargetsForBridge } from './modModel';
 import {
   writeTransportFile,
   TransportTrack,
@@ -48,6 +49,8 @@ export class SeqPanel {
   private panel: vscode.WebviewPanel | undefined;
   private transportDumpTimer: ReturnType<typeof setTimeout> | undefined;
   private lastPlayheadStep = -1;
+  private lastTransportRunning: boolean | undefined;
+  private lastTransportDump?: SeqTransportDump;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -59,7 +62,8 @@ export class SeqPanel {
     ) => Promise<boolean | void>,
     private readonly onTransportNeeded: (
       transportPath: string,
-      source?: string
+      source?: string,
+      force?: boolean
     ) => Promise<boolean | void>,
     private readonly onLiveBpmFromSeq?: (bpm: number) => void
   ) {}
@@ -97,6 +101,11 @@ export class SeqPanel {
     return !!this.panel;
   }
 
+  /** True when ChucK transport was last started for a running sequencer pattern. */
+  hasRunningTracks(): boolean {
+    return this.lastTransportRunning === true;
+  }
+
   /** Update master BPM from rack or host (does not re-notify rack). */
   setMasterBpm(bpm: number): void {
     const safe = Math.max(40, Math.min(200, bpm));
@@ -106,7 +115,8 @@ export class SeqPanel {
   async ensureBridge(): Promise<boolean> {
     const anns = collectAnnotations(this.shredOps);
     const { oscPort } = getConfig();
-    const bridge = writeBridgeFile(anns, oscPort);
+    const modTargets = collectModTargetsForBridge(this.shredOps);
+    const bridge = writeBridgeFile(anns, oscPort, modTargets);
     try {
       const changed = await this.onBridgeNeeded(bridge.path, bridge.source);
       if (changed) {
@@ -131,13 +141,19 @@ export class SeqPanel {
     this.osc.sendInt(host, oscPort, `/chuck/${LIVE_TRANSPORT.swing}`, 0);
   }
 
+  /** Clear transport reload cache (call when the VM stops or restarts). */
+  resetTransportTracking(): void {
+    this.lastTransportRunning = undefined;
+    this.lastPlayheadStep = -1;
+  }
+
   /** Handle /chuck/live_playhead from the transport shred (Sync ON only). */
-  onPlayheadOsc(step: number, running: number): void {
+  onPlayheadOsc(step: number, running?: number): void {
     if (!this.panel) {
       return;
     }
-    // Host independent clocks own the UI playhead when Sync is off.
-    if (running <= 0.5) {
+    // Only ignore when transport explicitly reports stopped (not when running arg is absent).
+    if (running !== undefined && running <= 0.5) {
       return;
     }
     const s = ((Math.round(step) % 16) + 16) % 16;
@@ -146,7 +162,7 @@ export class SeqPanel {
     this.panel.webview.postMessage({
       type: 'playhead',
       step: s,
-      running: running > 0.5,
+      running: running === undefined || running > 0.5,
       wrapped,
     });
   }
@@ -178,6 +194,36 @@ export class SeqPanel {
       .map((a) => a.name)
       .sort();
     return { type: 'targets', targets, gates };
+  }
+
+  /** Re-push live_* OSC after bridge OTF-replace (bridge no longer zeros globals). */
+  republishTransportOsc(): void {
+    this.republishTransportBusFromCache();
+    this.panel?.webview.postMessage({ type: 'bridgeReloaded' });
+  }
+
+  /** Push cached transport bus state to bridge OSC (host-side, no webview required). */
+  republishTransportBusFromCache(): void {
+    const dump = this.lastTransportDump;
+    if (!dump) {
+      return;
+    }
+    const chuckOwnsClock = dump.syncClocks !== false;
+    this.publishTransportBus({
+      bpm: dump.masterBpm,
+      step: dump.sharedPlayhead,
+      running: chuckOwnsClock ? dump.running : false,
+      swingEnabled: dump.swingEnabled,
+    });
+    if (chuckOwnsClock && dump.running) {
+      const { oscPort } = getConfig();
+      this.osc.sendInt(
+        '127.0.0.1',
+        oscPort,
+        `/chuck/${LIVE_TRANSPORT.cmd}`,
+        1
+      );
+    }
   }
 
   private async prepareBridgeAndSync(): Promise<void> {
@@ -434,13 +480,27 @@ export class SeqPanel {
   }
 
   private async applyTransportDump(dump: SeqTransportDump): Promise<void> {
+    this.lastTransportDump = dump;
     const chuckOwnsClock = dump.syncClocks !== false;
+    const running = chuckOwnsClock ? !!dump.running : false;
+    const forceTransport = this.lastTransportRunning !== running;
+    this.lastTransportRunning = running;
+
     this.publishTransportBus({
       bpm: dump.masterBpm,
       step: dump.sharedPlayhead,
       running: chuckOwnsClock ? dump.running : false,
       swingEnabled: dump.swingEnabled,
     });
+    if (chuckOwnsClock && dump.running) {
+      const { oscPort } = getConfig();
+      this.osc.sendInt(
+        '127.0.0.1',
+        oscPort,
+        `/chuck/${LIVE_TRANSPORT.cmd}`,
+        1
+      );
+    }
 
     // Sync ON → pattern player; Sync OFF → idle transport (host fires OSC).
     const spec = chuckOwnsClock
@@ -448,7 +508,7 @@ export class SeqPanel {
       : this.buildStoppedTransportSpec(dump);
     const file = writeTransportFile(spec);
     try {
-      await this.onTransportNeeded(file.path, file.source);
+      await this.onTransportNeeded(file.path, file.source, forceTransport);
     } catch (err) {
       console.warn('transport reload skipped:', err);
     }
@@ -459,8 +519,23 @@ export class SeqPanel {
       clearTimeout(this.transportDumpTimer);
       this.transportDumpTimer = undefined;
     }
-    // Stop / sync-off must not wait on debounce — avoids double-firing with host clock.
-    if (dump.syncClocks === false || dump.running === false) {
+    const chuckOwnsClock = dump.syncClocks !== false;
+    const running = chuckOwnsClock ? !!dump.running : false;
+    // Ignore redundant stop dumps (shred add used to spam these via pushTargets).
+    if (
+      !running &&
+      this.lastTransportRunning === false &&
+      (!dump.trackOrder?.length || dump.trackOrder.every((n) => !dump.patterns?.[n]?.running))
+    ) {
+      return;
+    }
+    // Stop / sync-off must apply immediately.
+    if (!chuckOwnsClock || !running) {
+      void this.applyTransportDump(dump);
+      return;
+    }
+    // Start must not wait on debounce.
+    if (running && this.lastTransportRunning !== true) {
       void this.applyTransportDump(dump);
       return;
     }

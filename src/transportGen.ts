@@ -86,6 +86,8 @@ export function generateTransportSource(spec: TransportSpec): string {
     }
   }
 
+  // Boot values baked into each transport OTF-replace (ChucK must own running here;
+  // bridge OSC alone is not reliable across shred replace).
   lines.push(
     '',
     `${bpm} => ${LIVE_TRANSPORT.bpm};`,

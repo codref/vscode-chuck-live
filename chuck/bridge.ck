@@ -34,14 +34,7 @@ global int live_swing;        // 1 = global swing enabled for odd steps
 // Example user annotation — merged from all loaded .ck files in real bridge:
 global float gain;
 
-// ---- boot values (match until OSC arrives) ----
-
-120.0 => live_bpm;
-0 => live_step;
-(60.0 / live_bpm / 4.0) => live_stepDur;   // one 16th at default 120 BPM
-0 => live_running;
-0 => live_cmd;
-0 => live_swing;
+// Transport bus owned by transport shred + host OSC — do not assign here.
 
 // ---- OSC input: extension Knobs / Sequencer → globals ----
 

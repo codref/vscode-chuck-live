@@ -1,21 +1,16 @@
 /**
- * Parse explicit knob/button/seq annotations above global declarations.
+ * Parse explicit knob/button/seq/mod annotations above global declarations.
  *
  *   // @knob min=0 max=1 step=0.01 default=0.5
  *   global float gain;
  *
- *   // @slider min=40 max=1600
- *   // @seq mode=raw
- *   global float sine_freq;
+ *   // @modSource label=LFO bipolar=1
+ *   global float mb_lfoOut;
  *
- *   // @seq mode=midi min=24 max=84 gate=mb_gate
- *   global float mb_noteHz;
+ *   // @modTarget label=Pitch unit=hz
+ *   global float mb_pitchMod;
  *
- *   // @seqGate
- *   global Event mb_gate;
- *
- *   // @button
- *   global Event bang;
+ *   // @modRoute src=LFO dst=Pitch default=1 depth=0.05
  */
 
 export type KnobKind = 'knob' | 'button';
@@ -41,35 +36,119 @@ export interface Annotation {
   seqGate?: string;
   /** Event is available as a sequencer gate. */
   isSeqGate?: boolean;
+  /** Accepts external modulation via mod matrix. */
+  isModTarget?: boolean;
+  modLabel?: string;
+  modUnit?: string;
+  modScale?: number;
 }
 
-/** A float or gate-only Event the Sequencer panel can drive. */
-export interface SeqTarget {
+/** Modulation source exported by a patch (`@modSource`). */
+export interface ModSource {
   name: string;
-  /** float = value lane; gate = Event trigger pads only */
-  kind: 'float' | 'gate';
-  mode: SeqMode;
-  min: number;
-  max: number;
-  step: number;
-  default: number;
-  gate?: string;
-  /** From explicit @seq or @seqGate */
-  preferred: boolean;
+  label: string;
+  bipolar: boolean;
   file?: string;
+  /** 1-based index assigned at scan time (global across session). */
+  index?: number;
+}
+
+/** Modulation destination (`@modTarget`). */
+export interface ModTarget {
+  /** Base global name from declaration. */
+  name: string;
+  /** Global written by mod-matrix shred. */
+  modName: string;
+  /** Route selector global (0 = patch default). */
+  srcName: string;
+  /** Route depth global 0..1. */
+  depthName: string;
+  label: string;
+  unit?: string;
+  scale?: number;
+  /** True when the declared global is the mod offset itself (not a knob). */
+  dedicated: boolean;
+  file?: string;
+  moduleFile?: string;
+  moduleTitle?: string;
+  shredId?: number;
+}
+
+/** Factory default route (`@modRoute`). */
+export interface ModRoute {
+  srcLabel: string;
+  dstLabel: string;
+  default: boolean;
+  depth: number;
+  file?: string;
+}
+
+/** Per-file mod matrix metadata. */
+export interface ModMatrixFileMeta {
+  sources: ModSource[];
+  targets: ModTarget[];
+  routes: ModRoute[];
 }
 
 const ATTR = /(\w+)\s*=\s*([^\s]+)/g;
 const GLOBAL_DECL =
   /^\s*global\s+(float|int|Event)\s+([A-Za-z_][\w]*)\s*;/;
-const ANN_LINE = /^\/\/\s*@(slider|knob|button|seq|seqGate)\b(.*)$/;
+const ANN_LINE =
+  /^\/\/\s*@(slider|knob|button|seq|seqGate|modSource|modTarget)\b(.*)$/;
+const MOD_ROUTE_LINE = /^\/\/\s*@modRoute\b(.*)$/;
+
+/** Route bus global names for a mod target. */
+export function modBusNames(
+  baseName: string,
+  dedicated: boolean
+): { modName: string; srcName: string; depthName: string } {
+  const modName = dedicated ? baseName : `${baseName}_mod`;
+  return {
+    modName,
+    srcName: `${modName}_src`,
+    depthName: `${modName}_depth`,
+  };
+}
 
 export function parseAnnotations(
   text: string,
   file?: string
 ): Annotation[] {
+  return parseFileAnnotations(text, file).annotations;
+}
+
+export function parseModMatrixFromFile(
+  text: string,
+  file?: string
+): ModMatrixFileMeta {
+  return parseFileAnnotations(text, file).mod;
+}
+
+function parseFileAnnotations(
+  text: string,
+  file?: string
+): { annotations: Annotation[]; mod: ModMatrixFileMeta } {
   const lines = text.split(/\r?\n/);
-  const out: Annotation[] = [];
+  const annotations: Annotation[] = [];
+  const sources: ModSource[] = [];
+  const targets: ModTarget[] = [];
+  const routes: ModRoute[] = [];
+
+  for (const raw of lines) {
+    const routeM = raw.trim().match(MOD_ROUTE_LINE);
+    if (routeM) {
+      const attrs = parseAttrs(routeM[1] || '');
+      if (attrs.src && attrs.dst) {
+        routes.push({
+          srcLabel: attrs.src,
+          dstLabel: attrs.dst,
+          default: attrs.default === '1' || attrs.default === 'true',
+          depth: num(attrs.depth, 0.5),
+          file,
+        });
+      }
+    }
+  }
 
   let i = 0;
   while (i < lines.length) {
@@ -80,7 +159,6 @@ export function parseAnnotations(
       continue;
     }
 
-    // Collect consecutive annotation comments (blank lines allowed between).
     const stack: { tag: string; rest: string }[] = [];
     while (i < lines.length) {
       const t = lines[i].trim();
@@ -96,9 +174,18 @@ export function parseAnnotations(
       i++;
     }
 
-    // Skip blanks then expect global decl
-    while (i < lines.length && lines[i].trim() === '') {
-      i++;
+    while (i < lines.length) {
+      const t = lines[i].trim();
+      if (t === '') {
+        i++;
+        continue;
+      }
+      // Skip doc lines like "// Extension: …" between @knob and the global decl.
+      if (t.startsWith('//') && !ANN_LINE.test(t)) {
+        i++;
+        continue;
+      }
+      break;
     }
     if (i >= lines.length) {
       break;
@@ -110,14 +197,59 @@ export function parseAnnotations(
 
     const type = decl[1] as Annotation['type'];
     const name = decl[2];
+
+    const modSource = stack.find((s) => s.tag === 'modSource');
+    if (modSource && type === 'float') {
+      const attrs = parseAttrs(modSource.rest);
+      sources.push({
+        name,
+        label: attrs.label || name,
+        bipolar: attrs.bipolar === '1' || attrs.bipolar === 'true',
+        file,
+      });
+    }
+
+    const modTargetTag = stack.find((s) => s.tag === 'modTarget');
+    if (modTargetTag && type === 'float') {
+      const attrs = parseAttrs(modTargetTag.rest);
+      const hasKnob = stack.some(
+        (s) => s.tag === 'knob' || s.tag === 'slider' || s.tag === 'seq'
+      );
+      const dedicated = !hasKnob;
+      const bus = modBusNames(name, dedicated);
+      targets.push({
+        name,
+        modName: bus.modName,
+        srcName: bus.srcName,
+        depthName: bus.depthName,
+        label: attrs.label || name,
+        unit: attrs.unit,
+        scale: attrs.scale !== undefined ? num(attrs.scale, 1) : undefined,
+        dedicated,
+        file,
+      });
+    }
+
     const ann = mergeStack(stack, name, type, file);
     if (ann) {
-      out.push(ann);
+      if (modTargetTag && type === 'float') {
+        const attrs = parseAttrs(modTargetTag.rest);
+        ann.isModTarget = true;
+        ann.modLabel = attrs.label || name;
+        ann.modUnit = attrs.unit;
+        if (attrs.scale !== undefined) {
+          ann.modScale = num(attrs.scale, 1);
+        }
+      }
+      annotations.push(ann);
     }
-    i++; // consume decl
+    i++;
   }
 
-  return out;
+  return {
+    annotations,
+    mod: { sources, targets, routes },
+  };
 }
 
 /** Float knobs + @seqGate Events for the Sequencer panel. */
@@ -179,6 +311,22 @@ export function seqTargetsFromAnnotations(anns: Annotation[]): SeqTarget[] {
   return targets;
 }
 
+/** A float or gate-only Event the Sequencer panel can drive. */
+export interface SeqTarget {
+  name: string;
+  /** float = value lane; gate = Event trigger pads only */
+  kind: 'float' | 'gate';
+  mode: SeqMode;
+  min: number;
+  max: number;
+  step: number;
+  default: number;
+  gate?: string;
+  /** From explicit @seq or @seqGate */
+  preferred: boolean;
+  file?: string;
+}
+
 /** Merge by name (later files win). */
 export function mergeAnnotations(lists: Annotation[][]): Annotation[] {
   const map = new Map<string, Annotation>();
@@ -203,6 +351,14 @@ function mergeStack(
   let seqMode: SeqMode | undefined;
   let seqGate: string | undefined;
   let isSeqGate = false;
+  const hasModSourceOnly =
+    stack.length === 1 && stack[0].tag === 'modSource';
+  const hasModTargetOnly =
+    stack.length === 1 && stack[0].tag === 'modTarget';
+
+  if (hasModSourceOnly || hasModTargetOnly) {
+    return undefined;
+  }
 
   for (const { tag, rest } of stack) {
     const a = parseAttrs(rest);
