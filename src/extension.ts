@@ -25,7 +25,10 @@ import { buildModulesFromShreds } from './rackModel';
 import { RackPanel } from './rackPanel';
 import { SeqPanel } from './seqPanel';
 import { WiringPanelProvider } from './wiringPanel';
-import { runInitProjectCommand } from './projectInit';
+import {
+  runInitProjectCommand,
+  importBundledPatternsCommand,
+} from './projectInit';
 import { AnnotationCompletionProvider } from './annotationComplete';
 import { ControlTreeProvider } from './controlView';
 import { ShredCodeLensProvider } from './shredLens';
@@ -84,7 +87,10 @@ export function activate(context: vscode.ExtensionContext): void {
     context.extensionUri,
     osc,
     shredOps,
-    context.workspaceState
+    context.workspaceState,
+    context.globalState,
+    version,
+    vm
   );
 
   let seq!: SeqPanel;
@@ -162,6 +168,8 @@ export function activate(context: vscode.ExtensionContext): void {
   let shredFxTimer: ReturnType<typeof setTimeout> | undefined;
   let shredFxWantBridge = false;
   let shredFxRunning = false;
+  /** Ignore shred list churn caused by our own managed OTF reloads. */
+  let shredFxSuppress = false;
 
   const runShredSideEffects = async (): Promise<void> => {
     if (!vm.running) {
@@ -173,9 +181,11 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
     shredFxRunning = true;
+    shredFxSuppress = true;
     const wantBridge = shredFxWantBridge;
     shredFxWantBridge = false;
     try {
+      await shredOps.reconcileShredIds();
       if (wantBridge) {
         await knobs.refresh(true);
         if (seq.isOpen) {
@@ -188,7 +198,9 @@ export function activate(context: vscode.ExtensionContext): void {
       await reloadMeter();
       await reloadModMatrix();
       refreshWiringUi();
+      await shredOps.reconcileShredIds();
     } finally {
+      shredFxSuppress = false;
       shredFxRunning = false;
       if (shredFxWantBridge) {
         scheduleShredSideEffects(true);
@@ -197,6 +209,12 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   const scheduleShredSideEffects = (bridge = false): void => {
+    if (shredFxSuppress) {
+      if (bridge) {
+        shredFxWantBridge = true;
+      }
+      return;
+    }
     if (bridge) {
       shredFxWantBridge = true;
     }
@@ -213,7 +231,11 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!vm.running) {
       return false;
     }
-    const codegen = collectModCodegen(shredOps, context.workspaceState);
+    const codegen = collectModCodegen(
+      shredOps,
+      context.workspaceState,
+      context.globalState
+    );
     if (!codegen.targets.length) {
       return false;
     }
@@ -289,10 +311,11 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     shredOps.onDidChange(() => {
-      if (rack.isOpen) {
+      if (rack.isOpen && !shredFxSuppress) {
         void rack.refresh(false);
       }
       // User-shred changes need bridge + meter refresh (managed shreds use silent remember).
+      // While side-effects run, only record that another pass is needed (no re-entrancy storm).
       scheduleShredSideEffects(true);
     })
   );
@@ -526,9 +549,11 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     cmd('chuckLive.showWiring', async () => {
+      wiring.remountWebview();
       await vscode.commands.executeCommand(
         'workbench.view.extension.chuckLivePanel'
       );
+      await wiring.refresh();
     }),
 
     cmd('chuckLive.showSession', async () => {
@@ -541,6 +566,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
     cmd('chuckLive.initProjectForce', async () => {
       await runInitProjectCommand(context.extensionPath, { force: true });
+    }),
+
+    cmd('chuckLive.importBundledPatterns', async () => {
+      await importBundledPatternsCommand(context.extensionPath);
     })
   );
 

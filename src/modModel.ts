@@ -47,16 +47,24 @@ export interface ModMatrixModel {
 }
 
 export function readModRoutes(
-  workspaceState?: vscode.Memento
+  workspaceState?: vscode.Memento,
+  globalState?: vscode.Memento
 ): ModRouteState[] {
-  return workspaceState?.get<ModRouteState[]>(MOD_ROUTES_STATE_KEY, []) ?? [];
+  const fromWorkspace =
+    workspaceState?.get<ModRouteState[]>(MOD_ROUTES_STATE_KEY, []) ?? [];
+  if (fromWorkspace.length) {
+    return fromWorkspace;
+  }
+  return globalState?.get<ModRouteState[]>(MOD_ROUTES_STATE_KEY, []) ?? [];
 }
 
 export async function writeModRoutes(
   workspaceState: vscode.Memento | undefined,
-  routes: ModRouteState[]
+  routes: ModRouteState[],
+  globalState?: vscode.Memento
 ): Promise<void> {
   await workspaceState?.update(MOD_ROUTES_STATE_KEY, routes);
+  await globalState?.update(MOD_ROUTES_STATE_KEY, routes);
 }
 
 function annotationsForFile(resolvedPath: string): ReturnType<
@@ -93,6 +101,43 @@ function annotationsForFile(resolvedPath: string): ReturnType<
   return { sources: [], targets: [], routes: [] };
 }
 
+function moduleFileMatches(stored: string, moduleFile: string): boolean {
+  if (stored === moduleFile) {
+    return true;
+  }
+  try {
+    const a = path.resolve(stored);
+    const b = path.resolve(moduleFile);
+    if (a === b) {
+      return true;
+    }
+  } catch {
+    /* ignore */
+  }
+  return path.basename(stored) === path.basename(moduleFile);
+}
+
+function findPersistedRoute(
+  persisted: ModRouteState[],
+  dst: string,
+  moduleFile: string
+): ModRouteState | undefined {
+  return (
+    persisted.find(
+      (r) => r.dst === dst && moduleFileMatches(r.moduleFile, moduleFile)
+    ) ?? persisted.find((r) => r.dst === dst)
+  );
+}
+
+/** Canonical path for route persistence / lookup. */
+export function normalizeModModuleFile(file: string): string {
+  try {
+    return path.resolve(file);
+  } catch {
+    return file;
+  }
+}
+
 function labelIndex(
   sources: ModSource[],
   label: string
@@ -113,8 +158,10 @@ function resolveActiveRoutes(
   const targets = meta.targets;
 
   for (const t of targets) {
-    const persistedRoute = persisted.find(
-      (r) => r.dst === t.modName && r.moduleFile === module.file
+    const persistedRoute = findPersistedRoute(
+      persisted,
+      t.modName,
+      module.file
     );
     if (persistedRoute) {
       const src = allSources.find((s) => s.name === persistedRoute.src);
@@ -135,11 +182,11 @@ function resolveActiveRoutes(
     );
     if (def && def.default) {
       const src = labelIndex(moduleSources, def.srcLabel);
-      if (src?.index) {
+      if (src && (src.index ?? 0) >= 1) {
         out.push({
           dst: t.modName,
           src: src.name,
-          srcIndex: src.index,
+          srcIndex: src.index ?? 0,
           depth: def.depth,
           isDefault: true,
         });
@@ -151,13 +198,14 @@ function resolveActiveRoutes(
 
 export function buildModMatrixModel(
   shredOps: ShredOps,
-  workspaceState?: vscode.Memento
+  workspaceState?: vscode.Memento,
+  globalState?: vscode.Memento
 ): ModMatrixModel {
   const vmUp = shredOps.list().some((s) => s.isBridge);
   const modules = buildModulesFromShreds(shredOps).filter(
     (m) => !m.isMaster && !m.isTransport
   );
-  const persisted = readModRoutes(workspaceState);
+  const persisted = readModRoutes(workspaceState, globalState);
 
   const allSources: ModSource[] = [];
   const sourceKey = new Set<string>();
@@ -197,7 +245,7 @@ export function buildModMatrixModel(
     moduleBlocks.push({
       id: mod.id,
       title: mod.title,
-      file: mod.file,
+      file: normalizeModModuleFile(mod.file),
       sources: localSources,
       targets,
       routes: resolveActiveRoutes(
@@ -217,13 +265,14 @@ export function buildModMatrixModel(
 /** All mod targets + sources for codegen. */
 export function collectModCodegen(
   shredOps: ShredOps,
-  workspaceState?: vscode.Memento
+  workspaceState?: vscode.Memento,
+  globalState?: vscode.Memento
 ): {
   sources: ModSource[];
   targets: ModTarget[];
   routes: Map<string, { srcIndex: number; depth: number }>;
 } {
-  const model = buildModMatrixModel(shredOps, workspaceState);
+  const model = buildModMatrixModel(shredOps, workspaceState, globalState);
   const targets: ModTarget[] = [];
   const routes = new Map<string, { srcIndex: number; depth: number }>();
 

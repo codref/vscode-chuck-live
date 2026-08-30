@@ -72,7 +72,79 @@ export async function initChuckProject(
     }
   }
 
+  const patternResult = seedBundledPatterns(
+    extensionPath,
+    options.workspaceRoot,
+    options.overwrite
+  );
+  copied += patternResult.copied;
+  skipped += patternResult.skipped;
+
   return { copied, skipped };
+}
+
+/** Copy examples/sequences/*.{json,ck} → workspace/.chuck-live/patterns/ */
+export function seedBundledPatterns(
+  extensionPath: string,
+  workspaceRoot: string,
+  overwrite: boolean
+): { copied: number; skipped: number } {
+  const srcDir = path.join(extensionPath, 'examples', 'sequences');
+  const destDir = path.join(workspaceRoot, '.chuck-live', 'patterns');
+  if (!fs.existsSync(srcDir)) {
+    return { copied: 0, skipped: 0 };
+  }
+  let copied = 0;
+  let skipped = 0;
+  fs.mkdirSync(destDir, { recursive: true });
+  for (const name of fs.readdirSync(srcDir)) {
+    if (!/\.(json|ck)$/i.test(name)) {
+      continue;
+    }
+    const n = copyFile(path.join(srcDir, name), path.join(destDir, name), overwrite);
+    if (n === 'copied') copied++;
+    if (n === 'skipped') skipped++;
+  }
+  return { copied, skipped };
+}
+
+/** Import bundled sequencer patterns without full library init. */
+export async function importBundledPatternsCommand(
+  extensionPath: string
+): Promise<void> {
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  if (!folder) {
+    void vscode.window.showErrorMessage('Open a workspace folder first.');
+    return;
+  }
+  const exists = fs.existsSync(
+    path.join(folder.uri.fsPath, '.chuck-live', 'patterns')
+  );
+  let overwrite = false;
+  if (exists) {
+    const policy = await vscode.window.showQuickPick(
+      [
+        { label: 'Merge (skip existing)', overwrite: false },
+        { label: 'Overwrite existing patterns', overwrite: true },
+        { label: 'Cancel', overwrite: undefined },
+      ],
+      { placeHolder: 'Import bundled patterns from extension' }
+    );
+    if (!policy || policy.overwrite === undefined) {
+      return;
+    }
+    overwrite = policy.overwrite;
+  }
+  const result = seedBundledPatterns(
+    extensionPath,
+    folder.uri.fsPath,
+    overwrite
+  );
+  void vscode.window.showInformationMessage(
+    `Imported bundled patterns: ${result.copied} copied${
+      result.skipped ? `, ${result.skipped} skipped` : ''
+    } → .chuck-live/patterns/`
+  );
 }
 
 /** Interactive init: pick preset, folder, agent deploy, overwrite policy. */

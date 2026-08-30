@@ -39,7 +39,9 @@ export function buildModulesFromShreds(shredOps: ShredOps): RackModule[] {
     })) {
       continue;
     }
-    const file = resolveChuckPath(shred.source);
+    const file = path.resolve(
+      resolveChuckPath(shred.source, shred.source)
+    );
     const title =
       path.basename(file) ||
       path.basename(shred.source) ||

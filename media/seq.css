@@ -342,3 +342,90 @@ body {
   border: 1px dashed var(--line);
   border-radius: 6px;
 }
+
+.transform-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--line);
+  background: #141820;
+}
+
+.transform-section {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.transform-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  min-width: 52px;
+  padding-top: 5px;
+  flex-shrink: 0;
+}
+
+.transform-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.transform-btn {
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  background: #222830;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1.2;
+  border-radius: 3px;
+}
+
+.transform-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.transform-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.euclid-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.euclid-k {
+  width: 32px;
+  padding: 2px 4px;
+  font-size: 10px;
+  background: #11151c;
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 3px;
+}
+
+.groove-preset {
+  font-size: 10px;
+  padding: 3px 4px;
+  background: #11151c;
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 3px;
+  max-width: 110px;
+}
+
+.track-gate .transform-section[data-group='pitch'] {
+  display: none;
+}

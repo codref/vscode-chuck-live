@@ -167,7 +167,8 @@ fun void follow() {
     if (mb_cutoff_mod_src == 0) {
       mb_cutoff * (1.0 + mb_lfoOut * 0.35) => flt.freq;
     } else {
-      mb_cutoff + mb_cutoff_mod => flt.freq;
+      // Matrix bus is source×depth (~[-1,1]) — scale into Hz.
+      Math.max(80.0, mb_cutoff + mb_cutoff_mod * 4000.0) => flt.freq;
     }
     mb_res => flt.Q;
 

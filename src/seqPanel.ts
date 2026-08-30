@@ -10,9 +10,15 @@ import {
   TransportSpec,
 } from './transportGen';
 import {
+  exportCkPattern,
+  parseCkPattern,
+  PatternSnapshot,
+} from './patternCk';
+import {
   collectAnnotations,
   collectSeqTargets,
 } from './knobsPanel';
+import { seedBundledPatterns } from './projectInit';
 
 const PATTERN_NAME_RE = /^[a-zA-Z0-9._-]+$/;
 
@@ -48,9 +54,12 @@ export interface SeqTransportDump {
 export class SeqPanel {
   private panel: vscode.WebviewPanel | undefined;
   private transportDumpTimer: ReturnType<typeof setTimeout> | undefined;
+  private transportApplyChain: Promise<void> = Promise.resolve();
+  private pendingTransportDump: SeqTransportDump | undefined;
   private lastPlayheadStep = -1;
-  private lastTransportRunning: boolean | undefined;
+  private lastTransportRunning = false;
   private lastTransportDump?: SeqTransportDump;
+  private lastAppliedTransportSource = '';
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -143,8 +152,10 @@ export class SeqPanel {
 
   /** Clear transport reload cache (call when the VM stops or restarts). */
   resetTransportTracking(): void {
-    this.lastTransportRunning = undefined;
+    this.lastTransportRunning = false;
     this.lastPlayheadStep = -1;
+    this.lastAppliedTransportSource = '';
+    this.pendingTransportDump = undefined;
   }
 
   /** Handle /chuck/live_playhead from the transport shred (Sync ON only). */
@@ -245,7 +256,7 @@ export class SeqPanel {
   }
 
   private sanitizePatternName(raw: string): string | undefined {
-    const n = raw.trim().replace(/\.json$/i, '');
+    const n = raw.trim().replace(/\.(json|ck)$/i, '');
     if (!n || !PATTERN_NAME_RE.test(n)) {
       return undefined;
     }
@@ -278,29 +289,135 @@ export class SeqPanel {
     return dir;
   }
 
-  private async listPatternNames(): Promise<string[]> {
-    const dir = this.patternsDir();
+  /** Bundled examples/sequences next to the extension. */
+  private bundledSequencesDir(): vscode.Uri {
+    return vscode.Uri.joinPath(this.extensionUri, 'examples', 'sequences');
+  }
+
+  /** Optional workspace library copy (after Init Project). */
+  private librarySequencesDir(): vscode.Uri | undefined {
+    const root = this.workspaceRoot();
+    if (!root) {
+      return undefined;
+    }
+    const cfg = vscode.workspace.getConfiguration('chuckLive');
+    const lib = cfg.get<string>('initLibraryDir', 'chuck');
+    return vscode.Uri.joinPath(root, lib, 'sequences');
+  }
+
+  /** Seed .chuck-live/patterns from extension if the folder is empty. */
+  private async ensurePatternsSeeded(): Promise<void> {
+    const root = this.workspaceRoot();
+    if (!root) {
+      return;
+    }
+    const existing = await this.listPatternEntriesIn(this.patternsDir());
+    if (existing.length > 0) {
+      return;
+    }
+    await this.ensurePatternsDir();
+    seedBundledPatterns(this.extensionUri.fsPath, root.fsPath, false);
+  }
+
+  private async listPatternEntriesIn(
+    dir: vscode.Uri | undefined
+  ): Promise<{ name: string; ext: 'json' | 'ck'; uri: vscode.Uri }[]> {
     if (!dir) {
       return [];
     }
     try {
       const entries = await vscode.workspace.fs.readDirectory(dir);
-      return entries
-        .filter(
-          ([name, type]) =>
-            type === vscode.FileType.File && /\.json$/i.test(name)
-        )
-        .map(([name]) => name.replace(/\.json$/i, ''))
-        .filter((n) => PATTERN_NAME_RE.test(n))
-        .sort((a, b) => a.localeCompare(b));
+      const out: { name: string; ext: 'json' | 'ck'; uri: vscode.Uri }[] = [];
+      for (const [name, type] of entries) {
+        if (type !== vscode.FileType.File) {
+          continue;
+        }
+        const jsonM = name.match(/^(.+)\.json$/i);
+        const ckM = name.match(/^(.+)\.ck$/i);
+        const base = jsonM?.[1] ?? ckM?.[1];
+        if (!base || !PATTERN_NAME_RE.test(base)) {
+          continue;
+        }
+        if (jsonM) {
+          out.push({
+            name: base,
+            ext: 'json',
+            uri: vscode.Uri.joinPath(dir, name),
+          });
+        } else if (ckM) {
+          out.push({
+            name: base,
+            ext: 'ck',
+            uri: vscode.Uri.joinPath(dir, name),
+          });
+        }
+      }
+      return out;
     } catch {
       return [];
     }
   }
 
+  /**
+   * Workspace patterns first, then library sequences, then bundled examples.
+   * Prefer .json over .ck when the same name appears in multiple places.
+   */
+  private async listPatternEntries(): Promise<
+    {
+      name: string;
+      ext: 'json' | 'ck';
+      uri: vscode.Uri;
+      source: string;
+    }[]
+  > {
+    const sources: { dir: vscode.Uri | undefined; label: string }[] = [
+      { dir: this.patternsDir(), label: '.chuck-live/patterns' },
+      { dir: this.librarySequencesDir(), label: 'library sequences' },
+      { dir: this.bundledSequencesDir(), label: 'bundled' },
+    ];
+
+    type Entry = {
+      name: string;
+      ext: 'json' | 'ck';
+      uri: vscode.Uri;
+      source: string;
+    };
+    const byKey = new Map<string, Entry>();
+
+    for (const src of sources) {
+      const entries = await this.listPatternEntriesIn(src.dir);
+      for (const e of entries) {
+        const key = `${e.name}.${e.ext}`;
+        if (byKey.has(key)) {
+          continue;
+        }
+        byKey.set(key, { ...e, source: src.label });
+      }
+    }
+
+    const out = [...byKey.values()];
+    out.sort(
+      (a, b) =>
+        a.name.localeCompare(b.name) ||
+        a.ext.localeCompare(b.ext) ||
+        a.source.localeCompare(b.source)
+    );
+    return out;
+  }
+
   private async handleSavePattern(data: unknown): Promise<void> {
     const dir = await this.ensurePatternsDir();
     if (!dir) {
+      return;
+    }
+    const formatPick = await vscode.window.showQuickPick(
+      [
+        { label: 'JSON (A/B banks, Sequencer UI)', format: 'json' as const },
+        { label: 'ChucK (.ck transport snapshot)', format: 'ck' as const },
+      ],
+      { placeHolder: 'Save pattern format' }
+    );
+    if (!formatPick) {
       return;
     }
     const name = await vscode.window.showInputBox({
@@ -318,50 +435,98 @@ export class SeqPanel {
     if (!safe) {
       return;
     }
-    const payload =
+    if (formatPick.format === 'json') {
+      const payload =
+        data && typeof data === 'object'
+          ? { ...(data as Record<string, unknown>), name: safe, version: 1 }
+          : { version: 1, name: safe };
+      const uri = vscode.Uri.joinPath(dir, `${safe}.json`);
+      const body = Buffer.from(JSON.stringify(payload, null, 2), 'utf8');
+      await vscode.workspace.fs.writeFile(uri, body);
+      void vscode.window.showInformationMessage(
+        `Saved pattern “${safe}” → .chuck-live/patterns/${safe}.json`
+      );
+      return;
+    }
+
+    const snap =
       data && typeof data === 'object'
-        ? { ...(data as Record<string, unknown>), name: safe, version: 1 }
-        : { version: 1, name: safe };
-    const uri = vscode.Uri.joinPath(dir, `${safe}.json`);
-    const body = Buffer.from(JSON.stringify(payload, null, 2), 'utf8');
-    await vscode.workspace.fs.writeFile(uri, body);
+        ? ({ ...(data as Record<string, unknown>), name: safe, version: 1 } as PatternSnapshot)
+        : ({ version: 1, name: safe, trackOrder: [], patterns: {} } as PatternSnapshot);
+    const dump: SeqTransportDump = {
+      masterBpm: snap.masterBpm,
+      syncClocks: snap.syncClocks,
+      swingEnabled: snap.swingEnabled,
+      running: false,
+      trackOrder: snap.trackOrder,
+      patterns: snap.patterns as SeqTransportDump['patterns'],
+    };
+    const spec = this.buildTransportSpec(dump);
+    const scale = snap.scaleName ?? 'phrygian';
+    const source = exportCkPattern(spec, { name: safe, scale });
+    const uri = vscode.Uri.joinPath(dir, `${safe}.ck`);
+    await vscode.workspace.fs.writeFile(uri, Buffer.from(source, 'utf8'));
     void vscode.window.showInformationMessage(
-      `Saved pattern “${safe}” → .chuck-live/patterns/${safe}.json`
+      `Saved pattern “${safe}” → .chuck-live/patterns/${safe}.ck`
     );
   }
 
   private async handleLoadPattern(): Promise<void> {
     if (!this.workspaceRoot()) {
-      void vscode.window.showErrorMessage(
-        'Open a workspace folder to load sequencer patterns.'
-      );
-      return;
+      // Still allow loading bundled patterns without a workspace.
+      const bundled = await this.listPatternEntriesIn(this.bundledSequencesDir());
+      if (!bundled.length) {
+        void vscode.window.showErrorMessage(
+          'Open a workspace folder to load sequencer patterns, or reinstall the extension (bundled sequences missing).'
+        );
+        return;
+      }
+    } else {
+      await this.ensurePatternsSeeded();
     }
-    const names = await this.listPatternNames();
-    if (!names.length) {
+
+    const entries = await this.listPatternEntries();
+    if (!entries.length) {
       void vscode.window.showInformationMessage(
-        'No patterns in .chuck-live/patterns/ yet. Use Save As… first.'
+        'No patterns found. Use Save As…, or run ChucK: Import Bundled Patterns.'
       );
       return;
     }
-    const picked = await vscode.window.showQuickPick(names, {
-      placeHolder: 'Load sequencer pattern',
-    });
+    const picked = await vscode.window.showQuickPick(
+      entries.map((e) => ({
+        label: e.name,
+        description: `${e.ext === 'json' ? 'JSON' : 'ChucK .ck'} · ${e.source}`,
+        entry: e,
+      })),
+      { placeHolder: 'Load sequencer pattern' }
+    );
     if (!picked) {
       return;
     }
-    const safe = this.sanitizePatternName(picked);
+    const safe = this.sanitizePatternName(picked.label);
     if (!safe) {
       return;
     }
-    const dir = this.patternsDir()!;
-    const uri = vscode.Uri.joinPath(dir, `${safe}.json`);
     try {
-      const raw = await vscode.workspace.fs.readFile(uri);
+      const raw = await vscode.workspace.fs.readFile(picked.entry.uri);
       const text = Buffer.from(raw).toString('utf8');
-      const data = JSON.parse(text) as unknown;
+      let data: unknown;
+      if (picked.entry.ext === 'json') {
+        data = JSON.parse(text) as unknown;
+      } else {
+        const parsed = parseCkPattern(text);
+        if (!parsed) {
+          void vscode.window.showErrorMessage(
+            'Not a valid ChucK Live pattern file (@chuckLivePattern header missing).'
+          );
+          return;
+        }
+        data = parsed;
+      }
       this.panel?.webview.postMessage({ type: 'patternLoaded', data });
-      void vscode.window.showInformationMessage(`Loaded pattern “${safe}”`);
+      void vscode.window.showInformationMessage(
+        `Loaded pattern “${safe}” (${picked.entry.ext})`
+      );
     } catch (err) {
       void vscode.window.showErrorMessage(
         `Failed to load pattern: ${String(err)}`
@@ -483,7 +648,6 @@ export class SeqPanel {
     this.lastTransportDump = dump;
     const chuckOwnsClock = dump.syncClocks !== false;
     const running = chuckOwnsClock ? !!dump.running : false;
-    const forceTransport = this.lastTransportRunning !== running;
     this.lastTransportRunning = running;
 
     this.publishTransportBus({
@@ -502,16 +666,34 @@ export class SeqPanel {
       );
     }
 
-    // Sync ON → pattern player; Sync OFF → idle transport (host fires OSC).
-    const spec = chuckOwnsClock
-      ? this.buildTransportSpec(dump)
-      : this.buildStoppedTransportSpec(dump);
+    // Running + sync on → bake patterns; otherwise idle transport (stable across shred adds).
+    const spec =
+      chuckOwnsClock && running
+        ? this.buildTransportSpec(dump)
+        : this.buildStoppedTransportSpec(dump);
     const file = writeTransportFile(spec);
+    if (file.source === this.lastAppliedTransportSource) {
+      return;
+    }
+    this.lastAppliedTransportSource = file.source;
     try {
-      await this.onTransportNeeded(file.path, file.source, forceTransport);
+      await this.onTransportNeeded(file.path, file.source);
     } catch (err) {
       console.warn('transport reload skipped:', err);
     }
+  }
+
+  private enqueueTransportDump(dump: SeqTransportDump): void {
+    this.pendingTransportDump = dump;
+    this.transportApplyChain = this.transportApplyChain
+      .then(async () => {
+        while (this.pendingTransportDump) {
+          const next = this.pendingTransportDump;
+          this.pendingTransportDump = undefined;
+          await this.applyTransportDump(next);
+        }
+      })
+      .catch(() => {});
   }
 
   private scheduleTransportDump(dump: SeqTransportDump): void {
@@ -521,27 +703,30 @@ export class SeqPanel {
     }
     const chuckOwnsClock = dump.syncClocks !== false;
     const running = chuckOwnsClock ? !!dump.running : false;
+    const tracksIdle =
+      !dump.trackOrder?.length ||
+      dump.trackOrder.every((n) => !dump.patterns?.[n]?.running);
     // Ignore redundant stop dumps (shred add used to spam these via pushTargets).
-    if (
-      !running &&
-      this.lastTransportRunning === false &&
-      (!dump.trackOrder?.length || dump.trackOrder.every((n) => !dump.patterns?.[n]?.running))
-    ) {
+    if (!running && this.lastTransportRunning === false && tracksIdle) {
       return;
+    }
+    // Claim stop state before async apply so parallel dumps coalesce.
+    if (!running) {
+      this.lastTransportRunning = false;
     }
     // Stop / sync-off must apply immediately.
     if (!chuckOwnsClock || !running) {
-      void this.applyTransportDump(dump);
+      this.enqueueTransportDump(dump);
       return;
     }
     // Start must not wait on debounce.
     if (running && this.lastTransportRunning !== true) {
-      void this.applyTransportDump(dump);
+      this.enqueueTransportDump(dump);
       return;
     }
     this.transportDumpTimer = setTimeout(() => {
       this.transportDumpTimer = undefined;
-      void this.applyTransportDump(dump);
+      this.enqueueTransportDump(dump);
     }, 40);
   }
 

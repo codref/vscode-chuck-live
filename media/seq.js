@@ -319,6 +319,745 @@
     return true;
   }
 
+  // --- Pattern transforms (edit bank) ---
+  /** @type {any} */
+  let laneClipboard = null;
+  /** @type {Record<string, any>} */
+  const undoStacks = {};
+  let focusedTrackName = null;
+
+  const GROOVE_PRESETS = {
+    'four-on-floor': [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
+    breakbeat: [0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0],
+    clave: [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0],
+    empty: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  };
+
+  function cloneBank(bank) {
+    return {
+      values: bank.values.slice(0, 16),
+      gates: bank.gates.slice(0, 16),
+      probs: normalizeProbs(bank.probs),
+    };
+  }
+
+  function pushUndo(name) {
+    const p = patterns[name];
+    if (!p) return;
+    ensureBanks(p);
+    undoStacks[name] = cloneBank(p.banks[p.editBank]);
+  }
+
+  function undoLastTransform(name) {
+    const snap = undoStacks[name];
+    if (!snap) return;
+    const p = patterns[name];
+    if (!p) return;
+    ensureBanks(p);
+    applyEditBankTransform(
+      name,
+      (bank) => {
+        bank.values = snap.values.slice();
+        bank.gates = snap.gates.slice();
+        bank.probs = snap.probs.slice();
+      },
+      { skipUndo: true }
+    );
+    delete undoStacks[name];
+  }
+
+  function applyEditBankTransform(name, mutator, opts) {
+    const skipUndo = opts && opts.skipUndo;
+    const p = patterns[name];
+    if (!p) return;
+    ensureBanks(p);
+    if (!skipUndo) pushUndo(name);
+    mutator(p.banks[p.editBank], p);
+    ensureBankProbs(p.banks[p.editBank]);
+    persist();
+    render();
+    if (!p.running || p.editBank === p.activeBank) dumpTransportSoon();
+  }
+
+  function rotateArray(arr, steps) {
+    const n = arr.length;
+    steps = ((steps % n) + n) % n;
+    if (steps === 0) return arr.slice();
+    return arr.slice(n - steps).concat(arr.slice(0, n - steps));
+  }
+
+  function reverseBank(bank) {
+    bank.values.reverse();
+    bank.gates.reverse();
+    bank.probs.reverse();
+  }
+
+  function rotateBank(bank, steps) {
+    bank.values = rotateArray(bank.values, steps);
+    bank.gates = rotateArray(bank.gates, steps);
+    bank.probs = rotateArray(bank.probs, steps);
+  }
+
+  function flipGatesBank(bank) {
+    for (let i = 0; i < 16; i++) {
+      bank.gates[i] = bank.gates[i] > 0.5 ? 0 : 1;
+    }
+  }
+
+  function clearGatesBank(bank) {
+    for (let i = 0; i < 16; i++) bank.gates[i] = 0;
+  }
+
+  function fillGatesBank(bank) {
+    for (let i = 0; i < 16; i++) {
+      bank.gates[i] = 1;
+      bank.probs[i] = 1;
+    }
+  }
+
+  function doubleBank(bank) {
+    for (let i = 0; i < 8; i++) {
+      const j = i + 8;
+      bank.values[j] = bank.values[i];
+      bank.gates[j] = bank.gates[i];
+      bank.probs[j] = bank.probs[i];
+    }
+  }
+
+  function halveBank(bank) {
+    for (let i = 0; i < 8; i++) {
+      const j = i + 8;
+      bank.values[i] = bank.values[j];
+      bank.gates[i] = bank.gates[j];
+      bank.probs[i] = bank.probs[j];
+    }
+  }
+
+  function stutterBank(bank, sliceLen) {
+    sliceLen = Math.max(1, Math.min(16, sliceLen));
+    for (let i = sliceLen; i < 16; i++) {
+      const src = i % sliceLen;
+      bank.values[i] = bank.values[src];
+      bank.gates[i] = bank.gates[src];
+      bank.probs[i] = bank.probs[src];
+    }
+  }
+
+  function offbeatBank(bank, parity) {
+    for (let i = 0; i < 16; i++) {
+      const isOdd = i % 2 === 1;
+      const keep = parity === 'odd' ? isOdd : !isOdd;
+      if (!keep) bank.gates[i] = 0;
+    }
+  }
+
+  function laneMinMax(p) {
+    return {
+      min: p.min ?? (p.mode === 'midi' ? 24 : 0),
+      max: p.max ?? (p.mode === 'midi' ? 84 : 1),
+    };
+  }
+
+  function applyPitchValue(bank, p, i, v) {
+    const mm = laneMinMax(p);
+    if (p.mode === 'midi') {
+      bank.values[i] = snapMidi(clamp(v, mm.min, mm.max, 1));
+    } else {
+      bank.values[i] = clamp(v, mm.min, mm.max, p.quant ?? 0.01);
+    }
+  }
+
+  function invertPitchBank(bank, p) {
+    const mm = laneMinMax(p);
+    const center = mm.min + mm.max;
+    for (let i = 0; i < 16; i++) {
+      applyPitchValue(bank, p, i, center - bank.values[i]);
+    }
+  }
+
+  function transposeBank(bank, p, semitones) {
+    for (let i = 0; i < 16; i++) {
+      applyPitchValue(bank, p, i, bank.values[i] + semitones);
+    }
+  }
+
+  function retrogradeInvBank(bank, p) {
+    reverseBank(bank);
+    invertPitchBank(bank, p);
+  }
+
+  function walkBank(bank, steps) {
+    bank.values = rotateArray(bank.values, steps);
+  }
+
+  function spreadBank(bank, p, factor) {
+    const mm = laneMinMax(p);
+    const center = (mm.min + mm.max) / 2;
+    const half = Math.max(1e-9, (mm.max - mm.min) / 2);
+    for (let i = 0; i < 16; i++) {
+      let t = (bank.values[i] - center) / half;
+      t = Math.max(-1, Math.min(1, t * (1 + factor)));
+      applyPitchValue(bank, p, i, center + t * half);
+    }
+  }
+
+  function snapLaneBank(bank, p) {
+    if (p.mode !== 'midi') return;
+    for (let i = 0; i < 16; i++) {
+      bank.values[i] = snapMidi(bank.values[i]);
+    }
+  }
+
+  function scaleNotesInRange(min, max) {
+    const degrees = SCALES[scaleName] || SCALES.chromatic;
+    const notes = [];
+    for (let oct = Math.floor(min / 12) - 1; oct <= Math.ceil(max / 12) + 1; oct++) {
+      for (const d of degrees) {
+        const n = oct * 12 + d;
+        if (n >= min && n <= max) notes.push(n);
+      }
+    }
+    notes.sort((a, b) => a - b);
+    return notes;
+  }
+
+  function transposeScaleDegree(bank, p, delta) {
+    const mm = laneMinMax(p);
+    const notes = scaleNotesInRange(mm.min, mm.max);
+    if (!notes.length) return;
+    for (let i = 0; i < 16; i++) {
+      const v = bank.values[i];
+      let bestIdx = 0;
+      let bestD = Math.abs(v - notes[0]);
+      for (let j = 1; j < notes.length; j++) {
+        const d = Math.abs(v - notes[j]);
+        if (d < bestD) {
+          bestD = d;
+          bestIdx = j;
+        }
+      }
+      const next = Math.max(0, Math.min(notes.length - 1, bestIdx + delta));
+      bank.values[i] = notes[next];
+    }
+  }
+
+  function densityBank(bank, delta) {
+    if (delta > 0) {
+      for (let i = 0; i < 16; i++) {
+        if (bank.gates[i] <= 0.5) {
+          bank.gates[i] = 1;
+          bank.probs[i] = 1;
+          return;
+        }
+      }
+      return;
+    }
+    let pick = -1;
+    let pickProb = 2;
+    for (let i = 0; i < 16; i++) {
+      if (bank.gates[i] > 0.5 && bank.probs[i] < pickProb) {
+        pickProb = bank.probs[i];
+        pick = i;
+      }
+    }
+    if (pick < 0) {
+      for (let i = 15; i >= 0; i--) {
+        if (bank.gates[i] > 0.5) {
+          pick = i;
+          break;
+        }
+      }
+    }
+    if (pick >= 0) bank.gates[pick] = 0;
+  }
+
+  function accentBank(bank, p) {
+    const accents = [0, 4, 8, 12];
+    for (const i of accents) {
+      bank.probs[i] = 1;
+      if (p.kind !== 'gate' && p.mode === 'raw') {
+        const mm = laneMinMax(p);
+        bank.values[i] = clamp(bank.values[i] + (mm.max - mm.min) * 0.08, mm.min, mm.max, p.quant);
+      }
+    }
+  }
+
+  function humanizeBank(bank, p) {
+    for (let i = 0; i < 16; i++) {
+      bank.probs[i] = clampProb(bank.probs[i] + (Math.random() - 0.5) * 0.2);
+      if (p.kind === 'gate') continue;
+      const jitter = p.mode === 'midi' ? (Math.random() > 0.5 ? 1 : -1) : (p.quant || 0.01) * (Math.random() > 0.5 ? 1 : -1);
+      applyPitchValue(bank, p, i, bank.values[i] + jitter);
+    }
+  }
+
+  function syncProbFromGates(bank) {
+    for (let i = 0; i < 16; i++) {
+      bank.probs[i] = bank.gates[i] > 0.5 ? 1 : 0;
+    }
+  }
+
+  function mutateProbBank(bank) {
+    for (let i = 0; i < 16; i++) {
+      bank.probs[i] = clampProb(0.3 + Math.random() * 0.7);
+    }
+  }
+
+  function euclideanPattern(steps, hits) {
+    if (hits <= 0) return Array(steps).fill(0);
+    if (hits >= steps) return Array(steps).fill(1);
+    const pattern = new Array(steps).fill(0);
+    let bucket = 0;
+    for (let i = 0; i < steps; i++) {
+      bucket += hits;
+      if (bucket >= steps) {
+        bucket -= steps;
+        pattern[i] = 1;
+      }
+    }
+    return pattern;
+  }
+
+  function euclideanBank(bank, hits) {
+    const pat = euclideanPattern(16, hits);
+    for (let i = 0; i < 16; i++) {
+      bank.gates[i] = pat[i];
+      bank.probs[i] = pat[i] ? 1 : 0;
+    }
+  }
+
+  function diceBank(bank, p) {
+    const mm = laneMinMax(p);
+    for (let i = 0; i < 16; i++) {
+      bank.gates[i] = Math.random() < 0.4 ? 1 : 0;
+      bank.probs[i] = bank.gates[i] ? clampProb(0.6 + Math.random() * 0.4) : 0;
+      if (p.kind !== 'gate') {
+        if (p.mode === 'midi') {
+          const notes = scaleNotesInRange(mm.min, mm.max);
+          bank.values[i] = notes.length ? notes[Math.floor(Math.random() * notes.length)] : mm.min;
+        } else {
+          bank.values[i] = mm.min + Math.random() * (mm.max - mm.min);
+          bank.values[i] = clamp(bank.values[i], mm.min, mm.max, p.quant);
+        }
+      }
+    }
+  }
+
+  function evolveBank(bank, p) {
+    const i = Math.floor(Math.random() * 16);
+    if (Math.random() < 0.5) {
+      bank.gates[i] = bank.gates[i] > 0.5 ? 0 : 1;
+    } else if (p.kind !== 'gate') {
+      const delta = p.mode === 'midi' ? (Math.random() > 0.5 ? 1 : -1) : (p.quant || 0.01) * (Math.random() > 0.5 ? 1 : -1);
+      applyPitchValue(bank, p, i, bank.values[i] + delta);
+    }
+  }
+
+  function applyGroovePreset(bank, presetId) {
+    const pat = GROOVE_PRESETS[presetId];
+    if (!pat) return;
+    for (let i = 0; i < 16; i++) {
+      bank.gates[i] = pat[i];
+      bank.probs[i] = pat[i] ? 1 : 0;
+    }
+  }
+
+  function copyLaneToClipboard(name) {
+    const p = patterns[name];
+    if (!p) return;
+    ensureBanks(p);
+    const bank = p.banks[p.editBank];
+    laneClipboard = {
+      kind: p.kind || 'float',
+      mode: p.mode,
+      values: bank.values.slice(),
+      gates: bank.gates.slice(),
+      probs: normalizeProbs(bank.probs),
+    };
+  }
+
+  function copyGatesToClipboard(name) {
+    const p = patterns[name];
+    if (!p) return;
+    ensureBanks(p);
+    const bank = p.banks[p.editBank];
+    laneClipboard = {
+      gatesOnly: true,
+      gates: bank.gates.slice(),
+      probs: normalizeProbs(bank.probs),
+    };
+  }
+
+  function copyValuesToClipboard(name) {
+    const p = patterns[name];
+    if (!p || p.kind === 'gate') return;
+    ensureBanks(p);
+    laneClipboard = {
+      valuesOnly: true,
+      values: p.banks[p.editBank].values.slice(),
+    };
+  }
+
+  function pasteCompatible(name) {
+    if (!laneClipboard) return false;
+    const p = patterns[name];
+    if (!p) return false;
+    if (laneClipboard.gatesOnly || laneClipboard.valuesOnly) return true;
+    if (laneClipboard.kind === 'gate' && p.kind !== 'gate') return false;
+    return true;
+  }
+
+  function pasteLaneFromClipboard(name) {
+    if (!laneClipboard || !pasteCompatible(name)) return;
+    applyEditBankTransform(name, (bank, p) => {
+      if (laneClipboard.valuesOnly) {
+        if (p.kind === 'gate') return;
+        for (let i = 0; i < 16; i++) bank.values[i] = laneClipboard.values[i];
+        return;
+      }
+      if (laneClipboard.gatesOnly) {
+        for (let i = 0; i < 16; i++) {
+          bank.gates[i] = laneClipboard.gates[i];
+          bank.probs[i] = laneClipboard.probs[i];
+        }
+        return;
+      }
+      for (let i = 0; i < 16; i++) {
+        bank.values[i] = laneClipboard.values[i];
+        bank.gates[i] = laneClipboard.gates[i];
+        bank.probs[i] = laneClipboard.probs[i];
+      }
+    });
+  }
+
+  function duplicateEditToBank(name, targetId) {
+    applyEditBankTransform(name, (bank, p) => {
+      const src = cloneBank(bank);
+      p.banks[targetId] = src;
+      ensureBankProbs(p.banks[targetId]);
+    });
+  }
+
+  function makeTransformBtn(label, title, onClick) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'transform-btn';
+    b.textContent = label;
+    b.title = title;
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  function makeTransformSection(label, group) {
+    const sec = document.createElement('div');
+    sec.className = 'transform-section';
+    sec.dataset.group = group;
+    const lab = document.createElement('span');
+    lab.className = 'transform-label';
+    lab.textContent = label;
+    sec.appendChild(lab);
+    const btns = document.createElement('div');
+    btns.className = 'transform-btns';
+    sec.appendChild(btns);
+    return { sec, btns };
+  }
+
+  function bindTrackKeyboard(trackEl, name, p) {
+    trackEl.tabIndex = -1;
+    trackEl.addEventListener('focusin', () => {
+      focusedTrackName = name;
+    });
+    trackEl.addEventListener('keydown', (e) => {
+      if (focusedTrackName !== name) return;
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+      if (e.ctrlKey && e.key === 'z') {
+        e.preventDefault();
+        undoLastTransform(name);
+        return;
+      }
+      if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault();
+        applyEditBankTransform(name, reverseBank);
+        return;
+      }
+      if (e.key === '[') {
+        e.preventDefault();
+        applyEditBankTransform(name, (bank) => rotateBank(bank, -1));
+        return;
+      }
+      if (e.key === ']') {
+        e.preventDefault();
+        applyEditBankTransform(name, (bank) => rotateBank(bank, 1));
+        return;
+      }
+      if (p.kind !== 'gate' && e.key === 'ArrowUp') {
+        e.preventDefault();
+        applyEditBankTransform(name, (bank, pat) => transposeBank(bank, pat, 1));
+        return;
+      }
+      if (p.kind !== 'gate' && e.key === 'ArrowDown') {
+        e.preventDefault();
+        applyEditBankTransform(name, (bank, pat) => transposeBank(bank, pat, -1));
+      }
+    });
+  }
+
+  function makeTransformBar(name, p) {
+    const bar = document.createElement('div');
+    bar.className = 'transform-bar';
+    bar.title = 'Edit bank only';
+
+    const struct = makeTransformSection('Structure', 'structure');
+    struct.btns.appendChild(
+      makeTransformBtn('Rev', 'Reverse step order', () =>
+        applyEditBankTransform(name, reverseBank)
+      )
+    );
+    struct.btns.appendChild(
+      makeTransformBtn('◀', 'Rotate left', () =>
+        applyEditBankTransform(name, (bank) => rotateBank(bank, -1))
+      )
+    );
+    struct.btns.appendChild(
+      makeTransformBtn('▶', 'Rotate right', () =>
+        applyEditBankTransform(name, (bank) => rotateBank(bank, 1))
+      )
+    );
+    struct.btns.appendChild(
+      makeTransformBtn('Flip', 'Toggle all gates', () =>
+        applyEditBankTransform(name, flipGatesBank)
+      )
+    );
+    struct.btns.appendChild(
+      makeTransformBtn('Clear', 'All gates off', () =>
+        applyEditBankTransform(name, clearGatesBank)
+      )
+    );
+    struct.btns.appendChild(
+      makeTransformBtn('Fill', 'All gates on', () =>
+        applyEditBankTransform(name, fillGatesBank)
+      )
+    );
+    struct.btns.appendChild(
+      makeTransformBtn('×2', 'Copy steps 1–8 → 9–16', () =>
+        applyEditBankTransform(name, doubleBank)
+      )
+    );
+    struct.btns.appendChild(
+      makeTransformBtn('÷2', 'Copy steps 9–16 → 1–8', () =>
+        applyEditBankTransform(name, halveBank)
+      )
+    );
+    struct.btns.appendChild(
+      makeTransformBtn('Stut4', 'Stutter first 4 steps', () =>
+        applyEditBankTransform(name, (bank) => stutterBank(bank, 4))
+      )
+    );
+    struct.btns.appendChild(
+      makeTransformBtn('Odd', 'Keep odd steps only', () =>
+        applyEditBankTransform(name, (bank) => offbeatBank(bank, 'odd'))
+      )
+    );
+    struct.btns.appendChild(
+      makeTransformBtn('Even', 'Keep even steps only', () =>
+        applyEditBankTransform(name, (bank) => offbeatBank(bank, 'even'))
+      )
+    );
+    bar.appendChild(struct.sec);
+
+    if (p.kind !== 'gate') {
+      const pitch = makeTransformSection('Pitch', 'pitch');
+      pitch.btns.appendChild(
+        makeTransformBtn('+1', 'Transpose up 1', () =>
+          applyEditBankTransform(name, (bank, pat) => transposeBank(bank, pat, 1))
+        )
+      );
+      pitch.btns.appendChild(
+        makeTransformBtn('-1', 'Transpose down 1', () =>
+          applyEditBankTransform(name, (bank, pat) => transposeBank(bank, pat, -1))
+        )
+      );
+      pitch.btns.appendChild(
+        makeTransformBtn('+12', 'Octave up', () =>
+          applyEditBankTransform(name, (bank, pat) => transposeBank(bank, pat, 12))
+        )
+      );
+      pitch.btns.appendChild(
+        makeTransformBtn('-12', 'Octave down', () =>
+          applyEditBankTransform(name, (bank, pat) => transposeBank(bank, pat, -12))
+        )
+      );
+      pitch.btns.appendChild(
+        makeTransformBtn('Inv', 'Invert pitch (gates unchanged)', () =>
+          applyEditBankTransform(name, invertPitchBank)
+        )
+      );
+      pitch.btns.appendChild(
+        makeTransformBtn('Retro', 'Reverse + invert pitch', () =>
+          applyEditBankTransform(name, retrogradeInvBank)
+        )
+      );
+      pitch.btns.appendChild(
+        makeTransformBtn('Walk◀', 'Rotate pitch values left', () =>
+          applyEditBankTransform(name, (bank) => walkBank(bank, -1))
+        )
+      );
+      pitch.btns.appendChild(
+        makeTransformBtn('Walk▶', 'Rotate pitch values right', () =>
+          applyEditBankTransform(name, (bank) => walkBank(bank, 1))
+        )
+      );
+      pitch.btns.appendChild(
+        makeTransformBtn('Spread', 'Widen pitch range', () =>
+          applyEditBankTransform(name, (bank, pat) => spreadBank(bank, pat, 0.15))
+        )
+      );
+      pitch.btns.appendChild(
+        makeTransformBtn('Compress', 'Narrow pitch range', () =>
+          applyEditBankTransform(name, (bank, pat) => spreadBank(bank, pat, -0.15))
+        )
+      );
+      pitch.btns.appendChild(
+        makeTransformBtn('Snap', 'Snap all notes to scale', () =>
+          applyEditBankTransform(name, snapLaneBank)
+        )
+      );
+      pitch.btns.appendChild(
+        makeTransformBtn('Deg+', 'Up one scale degree', () =>
+          applyEditBankTransform(name, (bank, pat) => transposeScaleDegree(bank, pat, 1))
+        )
+      );
+      pitch.btns.appendChild(
+        makeTransformBtn('Deg-', 'Down one scale degree', () =>
+          applyEditBankTransform(name, (bank, pat) => transposeScaleDegree(bank, pat, -1))
+        )
+      );
+      bar.appendChild(pitch.sec);
+    }
+
+    const rhythm = makeTransformSection('Rhythm', 'rhythm');
+    rhythm.btns.appendChild(
+      makeTransformBtn('D+', 'Add one hit', () =>
+        applyEditBankTransform(name, (bank) => densityBank(bank, 1))
+      )
+    );
+    rhythm.btns.appendChild(
+      makeTransformBtn('D-', 'Remove sparsest hit', () =>
+        applyEditBankTransform(name, (bank) => densityBank(bank, -1))
+      )
+    );
+    rhythm.btns.appendChild(
+      makeTransformBtn('Accent', 'Accent beats 1/5/9/13', () =>
+        applyEditBankTransform(name, accentBank)
+      )
+    );
+    rhythm.btns.appendChild(
+      makeTransformBtn('Human', 'Humanize pitch + probability', () =>
+        applyEditBankTransform(name, humanizeBank)
+      )
+    );
+    rhythm.btns.appendChild(
+      makeTransformBtn('Prob↔', 'Sync prob from gates', () =>
+        applyEditBankTransform(name, syncProbFromGates)
+      )
+    );
+    rhythm.btns.appendChild(
+      makeTransformBtn('MutP', 'Randomize probabilities', () =>
+        applyEditBankTransform(name, mutateProbBank)
+      )
+    );
+    bar.appendChild(rhythm.sec);
+
+    const gen = makeTransformSection('Gen', 'gen');
+    const euclWrap = document.createElement('span');
+    euclWrap.className = 'euclid-wrap';
+    const euclK = document.createElement('input');
+    euclK.type = 'number';
+    euclK.className = 'euclid-k';
+    euclK.min = '0';
+    euclK.max = '16';
+    euclK.value = '4';
+    euclK.title = 'Euclidean hits (k)';
+    euclWrap.appendChild(euclK);
+    euclWrap.appendChild(
+      makeTransformBtn('Eucl', 'Euclidean rhythm', () => {
+        const k = Math.max(0, Math.min(16, Number(euclK.value) || 0));
+        euclK.value = String(k);
+        applyEditBankTransform(name, (bank) => euclideanBank(bank, k));
+      })
+    );
+    gen.btns.appendChild(euclWrap);
+    gen.btns.appendChild(
+      makeTransformBtn('Dice', 'Random pattern', () =>
+        applyEditBankTransform(name, diceBank)
+      )
+    );
+    gen.btns.appendChild(
+      makeTransformBtn('Evolve', 'Mutate one random step', () =>
+        applyEditBankTransform(name, evolveBank)
+      )
+    );
+    const presetSel = document.createElement('select');
+    presetSel.className = 'groove-preset';
+    presetSel.title = 'Apply groove preset to gates';
+    const presetOpts = [
+      ['', 'Preset…'],
+      ['four-on-floor', 'Four on floor'],
+      ['breakbeat', 'Breakbeat'],
+      ['clave', 'Clave 3-3-2'],
+      ['empty', 'Empty'],
+    ];
+    for (const [val, lab] of presetOpts) {
+      const o = document.createElement('option');
+      o.value = val;
+      o.textContent = lab;
+      presetSel.appendChild(o);
+    }
+    presetSel.addEventListener('change', () => {
+      const id = presetSel.value;
+      if (!id) return;
+      applyEditBankTransform(name, (bank) => applyGroovePreset(bank, id));
+      presetSel.value = '';
+    });
+    gen.btns.appendChild(presetSel);
+    bar.appendChild(gen.sec);
+
+    const flow = makeTransformSection('Workflow', 'workflow');
+    flow.btns.appendChild(
+      makeTransformBtn('Copy', 'Copy lane to clipboard', () => copyLaneToClipboard(name))
+    );
+    const pasteBtn = makeTransformBtn('Paste', 'Paste from clipboard', () =>
+      pasteLaneFromClipboard(name)
+    );
+    flow.btns.appendChild(pasteBtn);
+    flow.btns.appendChild(
+      makeTransformBtn('CpGates', 'Copy gates only', () => copyGatesToClipboard(name))
+    );
+    if (p.kind !== 'gate') {
+      flow.btns.appendChild(
+        makeTransformBtn('CpVals', 'Copy values only', () => copyValuesToClipboard(name))
+      );
+    }
+    flow.btns.appendChild(
+      makeTransformBtn('To A', 'Copy edit bank → A', () => duplicateEditToBank(name, 'A'))
+    );
+    flow.btns.appendChild(
+      makeTransformBtn('To B', 'Copy edit bank → B', () => duplicateEditToBank(name, 'B'))
+    );
+    flow.btns.appendChild(
+      makeTransformBtn('Undo', 'Undo last transform', () => undoLastTransform(name))
+    );
+    bar.appendChild(flow.sec);
+
+    function refreshPasteState() {
+      pasteBtn.disabled = !pasteCompatible(name);
+    }
+    refreshPasteState();
+    bar.addEventListener('focusin', refreshPasteState);
+
+    return bar;
+  }
+
   function ensurePatternFlags(p) {
     if (p.swing === undefined || p.swing === null) p.swing = 0;
     else p.swing = clampSwing(p.swing);
@@ -1158,6 +1897,9 @@
     gridScroll.appendChild(grid);
     track.appendChild(bar);
     track.appendChild(gridScroll);
+    const transformBar = makeTransformBar(name, p);
+    track.appendChild(transformBar);
+    bindTrackKeyboard(track, name, p);
     return track;
   }
 
@@ -1195,7 +1937,7 @@
         trackOrder.length +
         ' track(s) · M/S mute/solo · Shift+drag gate = probability · swing ' +
         (swingEnabled ? 'ON' : 'OFF') +
-        ' · patterns in .chuck-live/patterns/';
+        ' · transforms below each grid · edit bank only · Undo per track · patterns in .chuck-live/patterns/';
     }
 
     for (const name of trackOrder) {

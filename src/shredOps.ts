@@ -91,7 +91,6 @@ export class ShredOps {
   /** path → shred id for files we added/replaced */
   private byPath = new Map<string, number>();
   private shreds = new Map<number, ShredInfo>();
-  private nextGuessId = 1;
   private bridgeId: number | undefined;
   private meterId: number | undefined;
   private transportId: number | undefined;
@@ -296,7 +295,6 @@ export class ShredOps {
     this.meterId = undefined;
     this.transportId = undefined;
     this.modMatrixId = undefined;
-    this.nextGuessId = 1;
     this.lastBridgeSource = '';
     this.lastMeterSource = '';
     this.lastTransportSource = '';
@@ -318,13 +316,150 @@ export class ShredOps {
     );
   }
 
-  /** Re-sync shred ids from VM status (fixes guessed ids when spork log is late). */
+  /** Re-sync managed shred ids from VM status and remove orphan duplicates. */
   async reconcileShredIds(): Promise<void> {
     try {
       await this.status();
     } catch (err) {
       this.vm.output.appendLine(`[warn] shred status: ${err}`);
+      return;
     }
+    this.syncManagedIdsFromShreds();
+    await this.pruneOrphanManagedShreds();
+  }
+
+  private syncManagedIdsFromShreds(): void {
+    this.bridgeId = this.pickLatestIdForPathToken('chuck-live-bridge');
+    if (this.bridgeId === undefined) {
+      this.bridgeId = this.pickLatestIdForPathToken('bridge.ck');
+    }
+    this.transportId = this.pickLatestIdForPathToken('chuck-live-transport');
+    if (this.transportId === undefined) {
+      this.transportId = this.pickLatestIdForPathToken('transport.ck');
+    }
+    this.meterId = this.pickLatestIdForPathToken('chuck-live-meter');
+    if (this.meterId === undefined) {
+      this.meterId = this.pickLatestIdForPathToken('meter.ck');
+    }
+    this.modMatrixId = this.pickLatestIdForPathToken('chuck-live-mod-matrix');
+    if (this.modMatrixId === undefined) {
+      this.modMatrixId = this.pickLatestIdForPathToken('mod-matrix.ck');
+    }
+  }
+
+  private pickLatestIdForPathToken(token: string): number | undefined {
+    let best: number | undefined;
+    for (const s of this.shreds.values()) {
+      if (!s.source.includes(token)) {
+        continue;
+      }
+      if (best === undefined || s.id > best) {
+        best = s.id;
+      }
+    }
+    return best;
+  }
+
+  private isManagedGeneratedSource(source: string): boolean {
+    return (
+      source.includes('chuck-live-bridge') ||
+      source.includes('chuck-live-transport') ||
+      source.includes('chuck-live-meter') ||
+      source.includes('chuck-live-mod-matrix')
+    );
+  }
+
+  private async pruneOrphanManagedShreds(): Promise<void> {
+    const keep = new Set(
+      [this.bridgeId, this.transportId, this.meterId, this.modMatrixId].filter(
+        (id): id is number => id !== undefined
+      )
+    );
+    const { executable, otfPort } = getConfig();
+    const client = otfClientExecutable(executable);
+    for (const s of [...this.shreds.values()]) {
+      if (!this.isManagedGeneratedSource(s.source) || keep.has(s.id)) {
+        continue;
+      }
+      try {
+        await this.otfRemove(client, otfPort, s.id);
+        this.vm.output.appendLine(
+          `[info] removed orphan managed shred #${s.id} (${path.basename(s.source)})`
+        );
+      } catch {
+        /* already gone */
+      }
+      this.forgetSilent(s.id);
+    }
+  }
+
+  private async resolveShredIdAfterAdd(
+    mark: number,
+    abs: string
+  ): Promise<number> {
+    const base = path.basename(abs);
+    const fromLog = parseSporkIdFromLog(this.vm.logSince(mark), base);
+    if (fromLog !== undefined) {
+      return fromLog;
+    }
+    await this.status();
+    const fromPath = this.byPath.get(path.resolve(abs));
+    if (fromPath !== undefined) {
+      return fromPath;
+    }
+    const fromStatus = this.findLatestIdByBasename(base);
+    if (fromStatus !== undefined) {
+      return fromStatus;
+    }
+    throw new Error(`OTF add: could not resolve VM shred id for ${base}`);
+  }
+
+  private findLatestIdByBasename(base: string): number | undefined {
+    let best: number | undefined;
+    for (const s of this.shreds.values()) {
+      if (path.basename(s.source) !== base) {
+        continue;
+      }
+      if (best === undefined || s.id > best) {
+        best = s.id;
+      }
+    }
+    return best;
+  }
+
+  private async otfReplaceManaged(
+    client: string,
+    otfPort: number,
+    abs: string,
+    shredId: number | undefined,
+    flags: ManagedShredFlags
+  ): Promise<number> {
+    if (shredId !== undefined) {
+      try {
+        await runChuck(client, [
+          '--silent',
+          `--port:${otfPort}`,
+          '=',
+          String(shredId),
+          abs,
+        ]);
+        this.remember(shredId, abs, flags, true);
+        return shredId;
+      } catch (err) {
+        this.vm.output.appendLine(
+          `[warn] OTF replace #${shredId} failed (${path.basename(abs)}): ${err}`
+        );
+        try {
+          await this.otfRemove(client, otfPort, shredId);
+        } catch {
+          /* already gone */
+        }
+        this.forgetSilent(shredId);
+      }
+    }
+    const id = await this.otfAdd(client, otfPort, abs);
+    this.remember(id, abs, flags, true);
+    return id;
   }
 
   /**
@@ -351,33 +486,14 @@ export class ShredOps {
 
     const { executable, otfPort } = getConfig();
     const client = otfClientExecutable(executable);
-
-    const addFresh = async (): Promise<void> => {
-      const id = await this.otfAdd(client, otfPort, abs);
-      this.bridgeId = id;
-      this.remember(id, abs, { isBridge: true }, true);
-    };
-
-    if (this.bridgeId !== undefined) {
-      try {
-        await runChuck(client, [
-          '--silent',
-          `--port:${otfPort}`,
-          '=',
-          String(this.bridgeId),
-          abs,
-        ]);
-        this.remember(this.bridgeId, abs, { isBridge: true }, true);
-      } catch (err) {
-        this.vm.output.appendLine(
-          `[warn] bridge replace #${this.bridgeId} failed — re-adding: ${err}`
-        );
-        this.bridgeId = undefined;
-        await addFresh();
-      }
-    } else {
-      await addFresh();
-    }
+    this.bridgeId = await this.otfReplaceManaged(
+      client,
+      otfPort,
+      abs,
+      this.bridgeId,
+      { isBridge: true }
+    );
+    await this.pruneOrphanManagedShreds();
     this.lastBridgeSource = src;
     return true;
   }
@@ -405,33 +521,14 @@ export class ShredOps {
 
     const { executable, otfPort } = getConfig();
     const client = otfClientExecutable(executable);
-
-    const addFresh = async (): Promise<void> => {
-      const id = await this.otfAdd(client, otfPort, abs);
-      this.meterId = id;
-      this.remember(id, abs, { isMeter: true }, true);
-    };
-
-    if (this.meterId !== undefined) {
-      try {
-        await runChuck(client, [
-          '--silent',
-          `--port:${otfPort}`,
-          '=',
-          String(this.meterId),
-          abs,
-        ]);
-        this.remember(this.meterId, abs, { isMeter: true }, true);
-      } catch (err) {
-        this.vm.output.appendLine(
-          `[warn] meter replace #${this.meterId} failed — re-adding: ${err}`
-        );
-        this.meterId = undefined;
-        await addFresh();
-      }
-    } else {
-      await addFresh();
-    }
+    this.meterId = await this.otfReplaceManaged(
+      client,
+      otfPort,
+      abs,
+      this.meterId,
+      { isMeter: true }
+    );
+    await this.pruneOrphanManagedShreds();
     this.lastMeterSource = src;
     return true;
   }
@@ -443,7 +540,7 @@ export class ShredOps {
   async loadTransport(
     transportPath: string,
     source?: string,
-    force = false
+    _force = false
   ): Promise<boolean> {
     this.ensureVm();
     const abs = path.resolve(transportPath);
@@ -458,7 +555,6 @@ export class ShredOps {
       })();
 
     if (
-      !force &&
       src &&
       src === this.lastTransportSource &&
       this.transportId !== undefined
@@ -468,33 +564,14 @@ export class ShredOps {
 
     const { executable, otfPort } = getConfig();
     const client = otfClientExecutable(executable);
-
-    const addFresh = async (): Promise<void> => {
-      const id = await this.otfAdd(client, otfPort, abs);
-      this.transportId = id;
-      this.remember(id, abs, { isTransport: true }, true);
-    };
-
-    if (this.transportId !== undefined) {
-      try {
-        await runChuck(client, [
-          '--silent',
-          `--port:${otfPort}`,
-          '=',
-          String(this.transportId),
-          abs,
-        ]);
-        this.remember(this.transportId, abs, { isTransport: true }, true);
-      } catch (err) {
-        this.vm.output.appendLine(
-          `[warn] transport replace #${this.transportId} failed — re-adding: ${err}`
-        );
-        this.transportId = undefined;
-        await addFresh();
-      }
-    } else {
-      await addFresh();
-    }
+    this.transportId = await this.otfReplaceManaged(
+      client,
+      otfPort,
+      abs,
+      this.transportId,
+      { isTransport: true }
+    );
+    await this.pruneOrphanManagedShreds();
     this.lastTransportSource = src;
     return true;
   }
@@ -526,22 +603,45 @@ export class ShredOps {
 
     const { executable, otfPort } = getConfig();
     const client = otfClientExecutable(executable);
-    if (this.modMatrixId !== undefined) {
-      await runChuck(client, [
-        '--silent',
-        `--port:${otfPort}`,
-        '=',
-        String(this.modMatrixId),
-        abs,
-      ]);
-      this.remember(this.modMatrixId, abs, { isModMatrix: true }, true);
-    } else {
-      const id = await this.otfAdd(client, otfPort, abs);
-      this.modMatrixId = id;
-      this.remember(id, abs, { isModMatrix: true }, true);
-    }
+    // Drop any duplicate mod-matrix shreds left by failed replaces (they spin forever).
+    await this.pruneAllModMatrixExcept(this.modMatrixId);
+    this.modMatrixId = await this.otfReplaceManaged(
+      client,
+      otfPort,
+      abs,
+      this.modMatrixId,
+      { isModMatrix: true }
+    );
+    await this.pruneOrphanManagedShreds();
     this.lastModMatrixSource = src;
     return true;
+  }
+
+  /** Remove every mod-matrix shred except `keepId` (VM + local bookkeeping). */
+  private async pruneAllModMatrixExcept(
+    keepId: number | undefined
+  ): Promise<void> {
+    const { executable, otfPort } = getConfig();
+    const client = otfClientExecutable(executable);
+    for (const s of [...this.shreds.values()]) {
+      const isMatrix =
+        s.isModMatrix || s.source.includes('chuck-live-mod-matrix');
+      if (!isMatrix) {
+        continue;
+      }
+      if (keepId !== undefined && s.id === keepId) {
+        continue;
+      }
+      try {
+        await this.otfRemove(client, otfPort, s.id);
+        this.vm.output.appendLine(
+          `[info] removed duplicate mod-matrix #${s.id}`
+        );
+      } catch {
+        /* already gone */
+      }
+      this.forgetSilent(s.id);
+    }
   }
 
   clearLocal(): void {
@@ -551,7 +651,6 @@ export class ShredOps {
     this.meterId = undefined;
     this.transportId = undefined;
     this.modMatrixId = undefined;
-    this.nextGuessId = 1;
     this.lastBridgeSource = '';
     this.lastMeterSource = '';
     this.lastTransportSource = '';
@@ -594,9 +693,6 @@ export class ShredOps {
       isTransport,
       isModMatrix,
     });
-    if (id >= this.nextGuessId) {
-      this.nextGuessId = id + 1;
-    }
     if (isBridge) {
       this.bridgeId = id;
     }
@@ -654,6 +750,26 @@ export class ShredOps {
       this.modMatrixId = undefined;
     }
     this._onDidChange.fire();
+  }
+
+  private forgetSilent(id: number): void {
+    const info = this.shreds.get(id);
+    if (info) {
+      this.byPath.delete(info.source);
+      this.shreds.delete(id);
+    }
+    if (this.bridgeId === id) {
+      this.bridgeId = undefined;
+    }
+    if (this.meterId === id) {
+      this.meterId = undefined;
+    }
+    if (this.transportId === id) {
+      this.transportId = undefined;
+    }
+    if (this.modMatrixId === id) {
+      this.modMatrixId = undefined;
+    }
   }
 
   private parseStatusLine(line: string): void {
@@ -755,10 +871,7 @@ export class ShredOps {
         if (lateId !== undefined) {
           return lateId;
         }
-        this.vm.output.appendLine(
-          `[info] OTF add (${base}) — VM id not in log yet, using #${this.nextGuessId}`
-        );
-        return this.nextGuessId++;
+        return await this.resolveShredIdAfterAdd(mark, abs);
       } catch (err) {
         this.vm.output.appendLine(`[warn] OTF add (${base}): ${err}`);
       }

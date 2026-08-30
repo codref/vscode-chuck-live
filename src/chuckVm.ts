@@ -211,6 +211,7 @@ export class ChuckVm {
       path.join(os.tmpdir(), `chuck-live-${otfPort}.pid`),
       this.output
     );
+    killChuckListenersOnPort(otfPort, this.output);
     if (portIsListening(otfPort)) {
       this.output.appendLine(`[kill] fuser -k ${otfPort}/tcp`);
       try {
@@ -351,6 +352,37 @@ export function portIsListening(port: number): boolean {
     }
   }
   return false;
+}
+
+/** SIGKILL any `chuck --loop` still bound to our OTF port (orphan VMs). */
+function killChuckListenersOnPort(
+  otfPort: number,
+  output: vscode.OutputChannel
+): void {
+  const portPat = `--port:${otfPort}`;
+  try {
+    const text = execFileSync('pgrep', ['-af', 'chuck'], {
+      encoding: 'utf8',
+      timeout: 3000,
+    });
+    for (const line of text.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed.includes(portPat) || !trimmed.includes('--loop')) {
+        continue;
+      }
+      const pid = Number.parseInt(trimmed.split(/\s+/)[0] ?? '', 10);
+      if (pid > 1) {
+        try {
+          process.kill(pid, 'SIGKILL');
+          output.appendLine(`[kill] SIGKILL orphan chuck pid ${pid}`);
+        } catch {
+          /* already gone */
+        }
+      }
+    }
+  } catch {
+    /* pgrep missing or no matches */
+  }
 }
 
 function killPidFile(

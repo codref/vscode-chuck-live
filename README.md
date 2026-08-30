@@ -38,7 +38,7 @@ Tip: drag the **ChucK Session** activity icon to the Secondary Side Bar for a ri
 
 Load **`master.ck` first**, then instruments/drums, then **`out/dac-out.ck` or `fx/bus-fx.ck`**. Add **`out/record-out.ck` anytime** to capture WAV (tap-only; safe mid-session). **Add / Reload** warns if a bus module is missing master or a second speaker shred would double-`dac` (Cancel or Add anyway). Details: [examples/README.md](examples/README.md).
 
-Cyberpunk bus recipe: [examples/cyberpunk/README.md](examples/cyberpunk/README.md). Standalone: `demo.ck`, `cyberpunk.ck` (direct `dac`).
+Cyberpunk: [examples/cyberpunk/GUIDE.md](examples/cyberpunk/GUIDE.md) (darkwave preset). Standalone: `standalone/demo.ck`, `standalone/cyberpunk.ck`.
 
 ## Annotations
 
@@ -112,7 +112,8 @@ bin/chuck-pw --probe
 - Add Current File / Reload Shred / Remove Shred / Remove All — inline actions on the Shreds list, CodeLens **Load** / **Reload**, editor title icons
 - Refresh Status / Refresh Knobs
 - **Open Rack** — full-page Eurorack modules for loaded shreds; **sequencer** faceplate with master BPM (`live_bpm`) when VM is running
-- **Open Sequencer** — 16-step cascade (`@knob`/`@seq`/`@seqGate`): A/B banks, optional swing (header toggle, off by default), step probability (Shift+drag gate), mute/solo, **Save As… / Load…** → `.chuck-live/patterns/<name>.json`. **Sync ON** uses a ChucK-owned transport shred (`live_bpm` / `live_step` / `live_stepDur` / `live_tick`); Sync OFF keeps independent host clocks.
-- **Init Project Library** — copy the bundled module library into your workspace (`chuck/` by default) and deploy AI guides (`AGENTS.md`, Cursor rule, Copilot instructions)
+- **Open Sequencer** — 16-step cascade: A/B banks, swing, probability, mute/solo, **Save As… / Load…** as JSON or `.ck` → `.chuck-live/patterns/`. **Sync ON** = ChucK transport (`live_*` globals).
+- **Init Project Library** — copy bundled modules + seed patterns into `.chuck-live/patterns/`
+- **Import Bundled Patterns** — copy `examples/sequences/*.{json,ck}` without full library init
 - **Re-init Project Library (force)** — replace an existing library and refresh AI guides (full preset wipes the library folder first)
 - **Meter** (ChucK Session) — L/R peak VU bars; auto-loaded with Start VM (with bridge + transport)

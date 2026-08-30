@@ -1,30 +1,50 @@
 import * as vscode from 'vscode';
+import { ChuckVm } from './chuckVm';
 import { getConfig } from './config';
 import { OscClient } from './oscClient';
 import { ShredOps } from './shredOps';
 import {
   ModMatrixModel,
+  ModRouteActive,
   ModRouteState,
   buildModMatrixModel,
+  normalizeModModuleFile,
   readModRoutes,
   writeModRoutes,
 } from './modModel';
 
 /**
- * Bottom-panel mod matrix: MicroBrute-style source → destination routing.
+ * Bottom-panel mod matrix: source × destination click grid.
  */
 export class WiringPanelProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'chuckLive.wiring';
+  /** Bump when wiring.js / wiring.css layout changes (forces webview remount). */
+  private static readonly UI_EPOCH = 'matrix-cells-5';
 
   private view?: vscode.WebviewView;
   private model: ModMatrixModel = { vmUp: false, sources: [], modules: [] };
+  private remountNonce = 0;
+  private lastOscPushKey = '';
+  private oscPushTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly osc: OscClient,
     private readonly shredOps: ShredOps,
-    private readonly workspaceState: vscode.Memento
+    private readonly workspaceState: vscode.Memento,
+    private readonly globalState: vscode.Memento,
+    private readonly extensionVersion: string,
+    private readonly vm?: ChuckVm
   ) {}
+
+  /** Reload webview HTML (clears cached wiring.js from prior extension builds). */
+  remountWebview(): void {
+    if (!this.view) {
+      return;
+    }
+    this.remountNonce += 1;
+    this.view.webview.html = this.html(this.view.webview, this.remountNonce);
+  }
 
   resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -36,19 +56,79 @@ export class WiringPanelProvider implements vscode.WebviewViewProvider {
       enableScripts: true,
       localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'media')],
     };
-    webviewView.webview.html = this.html(webviewView.webview);
     webviewView.webview.onDidReceiveMessage((msg) => {
       void this.onMessage(msg);
     });
+    this.remountWebview();
     void this.refresh();
   }
 
   async refresh(): Promise<void> {
-    this.model = buildModMatrixModel(this.shredOps, this.workspaceState);
+    this.model = buildModMatrixModel(
+      this.shredOps,
+      this.workspaceState,
+      this.globalState
+    );
+    const persisted = readModRoutes(this.workspaceState, this.globalState);
     this.view?.webview.postMessage({
       type: 'setMatrix',
       model: this.model,
+      persistedRoutes: persisted,
     });
+    // Only push OSC when the VM process is actually up (model.vmUp can be stale).
+    if (this.vm?.running) {
+      this.schedulePushRoutesOsc();
+    }
+  }
+
+  /** Coalesce OSC route dumps — opening/refreshing the panel must not flood the bridge. */
+  private schedulePushRoutesOsc(): void {
+    if (this.oscPushTimer !== undefined) {
+      clearTimeout(this.oscPushTimer);
+    }
+    this.oscPushTimer = setTimeout(() => {
+      this.oscPushTimer = undefined;
+      this.pushRoutesOsc();
+    }, 80);
+  }
+
+  private pushRoutesOsc(): void {
+    if (!this.vm?.running || !this.model.vmUp) {
+      return;
+    }
+    const key = this.model.modules
+      .flatMap((m) =>
+        m.routes
+          .filter((r) => r.srcIndex >= 1)
+          .map((r) => `${r.dst}:${r.srcIndex}:${r.depth.toFixed(3)}`)
+      )
+      .sort()
+      .join('|');
+    if (key === this.lastOscPushKey) {
+      return;
+    }
+    this.lastOscPushKey = key;
+
+    const { oscPort } = getConfig();
+    const host = '127.0.0.1';
+    for (const mod of this.model.modules) {
+      for (const route of mod.routes) {
+        if (route.srcIndex < 1) {
+          continue;
+        }
+        const target = mod.targets.find((t) => t.modName === route.dst);
+        if (!target) {
+          continue;
+        }
+        this.osc.sendInt(host, oscPort, `/chuck/${target.srcName}`, route.srcIndex);
+        this.osc.sendFloat(
+          host,
+          oscPort,
+          `/chuck/${target.depthName}`,
+          route.depth
+        );
+      }
+    }
   }
 
   private async onMessage(msg: {
@@ -72,7 +152,16 @@ export class WiringPanelProvider implements vscode.WebviewViewProvider {
       const srcEntry = this.model.sources.find((s) => s.name === msg.src);
       const srcIndex = srcEntry?.index ?? msg.srcIndex ?? 0;
       const target = this.lookupTarget(msg.dst);
-      if (!target || srcIndex < 1) {
+      if (!target) {
+        void vscode.window.showWarningMessage(
+          `Mod matrix: unknown destination ${msg.dst}`
+        );
+        return;
+      }
+      if (srcIndex < 1) {
+        void vscode.window.showWarningMessage(
+          `Mod matrix: source ${msg.src} is not registered — reload shreds with @modSource.`
+        );
         return;
       }
 
@@ -80,11 +169,17 @@ export class WiringPanelProvider implements vscode.WebviewViewProvider {
         dst: msg.dst,
         src: msg.src,
         depth,
-        moduleFile: msg.moduleFile,
+        moduleFile: normalizeModModuleFile(msg.moduleFile),
       });
 
       this.osc.sendInt(host, oscPort, `/chuck/${target.srcName}`, srcIndex);
       this.osc.sendFloat(host, oscPort, `/chuck/${target.depthName}`, depth);
+      // Invalidate OSC dump cache so a later refresh re-pushes if needed.
+      this.lastOscPushKey = '';
+      // Live route edits use OSC only — do not OTF-reload mod-matrix (avoids shred ID thrash).
+      this.vm?.output.appendLine(
+        `[mod] ${msg.src} (#${srcIndex}) → ${msg.dst} depth ${depth.toFixed(2)}`
+      );
       return;
     }
 
@@ -96,7 +191,9 @@ export class WiringPanelProvider implements vscode.WebviewViewProvider {
       await this.removeRoute(msg.dst);
       this.osc.sendInt(host, oscPort, `/chuck/${target.srcName}`, 0);
       this.osc.sendFloat(host, oscPort, `/chuck/${target.depthName}`, 0);
-      await this.refresh();
+      this.lastOscPushKey = '';
+      this.view?.webview.postMessage({ type: 'routeCleared', dst: msg.dst });
+      this.vm?.output.appendLine(`[mod] cleared ${msg.dst}`);
       return;
     }
 
@@ -110,29 +207,41 @@ export class WiringPanelProvider implements vscode.WebviewViewProvider {
         return;
       }
       const depth = clamp01(msg.depth);
-      const routes = readModRoutes(this.workspaceState);
+      const routes = readModRoutes(this.workspaceState, this.globalState);
       let existing = routes.find((r) => r.dst === msg.dst);
       if (!existing && msg.moduleFile && msg.src) {
         existing = {
           dst: msg.dst,
           src: msg.src,
           depth,
-          moduleFile: msg.moduleFile,
+          moduleFile: normalizeModModuleFile(msg.moduleFile),
         };
         routes.push(existing);
       } else if (existing) {
         existing.depth = depth;
       }
       if (existing) {
-        await writeModRoutes(this.workspaceState, routes);
-        await this.refresh();
+        void writeModRoutes(this.workspaceState, routes, this.globalState);
+        this.patchModelDepth(msg.dst, depth);
       }
-      const srcEntry = this.model.sources.find((s) => s.name === (existing?.src ?? msg.src));
+      const srcEntry = this.model.sources.find(
+        (s) => s.name === (existing?.src ?? msg.src)
+      );
       const srcIndex = srcEntry?.index ?? 0;
       if (srcIndex >= 1) {
         this.osc.sendInt(host, oscPort, `/chuck/${target.srcName}`, srcIndex);
       }
       this.osc.sendFloat(host, oscPort, `/chuck/${target.depthName}`, depth);
+    }
+  }
+
+  /** Update cached depth without re-rendering the webview (keeps sliders draggable). */
+  private patchModelDepth(dst: string, depth: number): void {
+    for (const mod of this.model.modules) {
+      const route = mod.routes.find((r) => r.dst === dst);
+      if (route) {
+        route.depth = depth;
+      }
     }
   }
 
@@ -148,41 +257,74 @@ export class WiringPanelProvider implements vscode.WebviewViewProvider {
     return undefined;
   }
 
+  private applyRouteToModel(route: ModRouteState): void {
+    const srcEntry = this.model.sources.find((s) => s.name === route.src);
+    const active: ModRouteActive = {
+      dst: route.dst,
+      src: route.src,
+      srcIndex: srcEntry?.index ?? 0,
+      depth: route.depth,
+      isDefault: false,
+    };
+    for (const mod of this.model.modules) {
+      if (!mod.targets.some((t) => t.modName === route.dst)) {
+        continue;
+      }
+      mod.routes = mod.routes.filter((r) => r.dst !== route.dst);
+      mod.routes.push(active);
+      break;
+    }
+  }
+
+  private notifyRoutePatched(route: ModRouteState): void {
+    this.view?.webview.postMessage({
+      type: 'routePatched',
+      dst: route.dst,
+      src: route.src,
+      depth: route.depth,
+    });
+  }
+
   private async persistRoute(route: ModRouteState): Promise<void> {
-    const routes = readModRoutes(this.workspaceState).filter(
+    const routes = readModRoutes(this.workspaceState, this.globalState).filter(
       (r) => r.dst !== route.dst
     );
     routes.push(route);
-    await writeModRoutes(this.workspaceState, routes);
-    await this.refresh();
+    await writeModRoutes(this.workspaceState, routes, this.globalState);
+    this.applyRouteToModel(route);
+    this.notifyRoutePatched(route);
   }
 
   private async removeRoute(dst: string): Promise<void> {
-    const routes = readModRoutes(this.workspaceState).filter(
+    const routes = readModRoutes(this.workspaceState, this.globalState).filter(
       (r) => r.dst !== dst
     );
-    await writeModRoutes(this.workspaceState, routes);
+    await writeModRoutes(this.workspaceState, routes, this.globalState);
+    for (const mod of this.model.modules) {
+      mod.routes = mod.routes.filter((r) => r.dst !== dst);
+    }
   }
 
-  private html(webview: vscode.Webview): string {
+  private html(webview: vscode.Webview, remountNonce: number): string {
+    const bust = `${this.extensionVersion}-${WiringPanelProvider.UI_EPOCH}-${remountNonce}`;
     const css = webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, 'media', 'wiring.css')
     );
     const js = webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, 'media', 'wiring.js')
     );
-    const nonce = String(Date.now());
+    const nonce = bust;
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';" />
-  <link rel="stylesheet" href="${css}" />
+    content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}' ${webview.cspSource};" />
+  <link rel="stylesheet" href="${css}?v=${bust}" />
 </head>
 <body>
   <div id="root"></div>
-  <script nonce="${nonce}" src="${js}"></script>
+  <script nonce="${nonce}" src="${js}?v=${bust}"></script>
 </body>
 </html>`;
   }

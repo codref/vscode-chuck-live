@@ -241,6 +241,16 @@
     input.addEventListener('dblclick', () => {
       state.commit(k.default ?? min, true, paint);
     });
+    cell.addEventListener(
+      'wheel',
+      (e) => {
+        e.preventDefault();
+        const mul = e.shiftKey ? 10 : 1;
+        const dir = e.deltaY < 0 ? 1 : -1;
+        state.commit(state.current + dir * step * mul, true, paint);
+      },
+      { passive: false }
+    );
 
     cell.appendChild(head);
     cell.appendChild(input);

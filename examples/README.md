@@ -53,7 +53,7 @@ fun void follow() {
 | `@modTarget` | Mod Matrix dest | `float` | Matrix writes offset; stack on `@knob` or dedicated `*_mod` global |
 | `@modRoute` | factory route | — | Standalone line: `src=LFO dst=Pitch default=1 depth=0.05` |
 
-**Mod matrix** — open the bottom-panel **Mod Matrix** view (`ChucK: Show Mod Matrix`). Click a source jack, then a destination to patch. Depth slider sets amount. When route `src` is `0`, the patch uses its internal `@modRoute` default. See [`minibrute/voice.ck`](minibrute/voice.ck).
+**Mod matrix** — open the bottom-panel **Mod Matrix** view (`ChucK: Show Mod Matrix`). It is a **source × destination click grid**: columns are `@modSource` outputs, rows are `@modTarget` inputs (cross-module routing works when both are loaded). Click a cell to patch; click the lit cell again to clear; select a patched cell and use the depth slider for amount. When route `src` is `0`, the patch uses its internal default. See [`minibrute/voice.ck`](minibrute/voice.ck), [`voices/acid-bass.ck`](voices/acid-bass.ck), [`voices/modem.ck`](voices/modem.ck), [`drums/bass.ck`](drums/bass.ck), [`drums/cyber/bass-digital.ck`](drums/cyber/bass-digital.ck).
 
 **Gate drums** — never block the listener for the full envelope; `spork` the hit:
 
@@ -86,10 +86,11 @@ Behind the scenes: `bridge.ck` (OSC → globals), `transport.ck` (clock + patter
 ```text
 osc / voice / drums ──► rackBus ──► master.ck ──► mainBus ──► dac-out.ck ──► dac
                                                          ├─► fx/bus-fx.ck ──► dac
+                                                         ├─► fx/cyber-fx.ck ──► dac
                                                          └─► record-out.ck ──► WvOut (optional tap)
 ```
 
-Load **one** speaker output after master: [`out/dac-out.ck`](out/dac-out.ck) **or** [`fx/bus-fx.ck`](fx/bus-fx.ck) — not both (double `dac`).
+Load **one** speaker output after master: [`out/dac-out.ck`](out/dac-out.ck), [`fx/bus-fx.ck`](fx/bus-fx.ck), or [`fx/cyber-fx.ck`](fx/cyber-fx.ck) — not more than one (double `dac`).
 
 Add [`out/record-out.ck`](out/record-out.ck) **anytime** after master to capture `mainBus` to WAV. It does **not** connect to `dac`, so it is safe to load/unload mid-session while dac-out or bus-fx stays up.
 
@@ -121,8 +122,8 @@ Records the **post-master** mix. With `bus-fx.ck`, the file is pre-FX (same tap 
 
 | File | What it is |
 |------|------------|
-| [`demo.ck`](demo.ck) | Minimal sine + knobs |
-| [`cyberpunk.ck`](cyberpunk.ck) | Neon pad / arp / rain (self-contained, no bus) |
+| [`standalone/demo.ck`](standalone/demo.ck) | Minimal sine + knobs |
+| [`standalone/cyberpunk.ck`](standalone/cyberpunk.ck) | Neon pad / arp / rain (self-contained, no bus) |
 
 ## Oscillators (`oscillators/`)
 
@@ -133,32 +134,67 @@ Records the **post-master** mix. With `bus-fx.ck`, the file is pre-FX (same tap 
 
 ## Drums (`drums/`)
 
+### Classic (`dk_*`)
+
 | File | Gate Event | Notes |
 |------|------------|--------|
 | `kick.ck` | `dk_kick` | Pitch-drop kick |
 | `hat.ck` | `dk_hat` | Noise hat |
 | `snare.ck` | `dk_snare` | Noise + body |
+| `bass.ck` | `dk_bass` | 808-style sub boom |
+
+### Cyber darkwave (`drums/cyber/`, `cy_*`)
+
+| File | Gate | Notes |
+|------|------|--------|
+| `kick-industrial.ck` | `cy_kick` | EBM kick + metallic ring |
+| `bass-digital.ck` | `cy_bass` | Lo-bit cyber sub boom (square + crush) |
+| `hat-metal.ck` | `cy_hat` | Resonant tick |
+| `snare-digital.ck` | `cy_snare` | Digital clap |
+| `perc-glitch.ck` | `cy_glitch` | Laser blips |
+
+Use **either** classic or cyber kit, not both. Darkwave: cyber drums + `cy_bass` *or* classic `bass.ck`. See [`drums/cyber/README.md`](drums/cyber/README.md).
 
 Sequencer auto-adds `@seqGate` tracks (pads only). Run with Sync clocks for a locked groove.
 
+## Voices (`voices/`)
+
+| File | Sequencer | Notes |
+|------|-----------|--------|
+| `tnt-riff.ck` | `tnt_noteHz`, `tnt_gate` | Power-chord stabs |
+| `acid-bass.ck` | `ab_noteHz`, `ab_accent`, `ab_gate` | 303-style monobass |
+| `modem.ck` | `md_gate`, `md_digit` | DTMF / FSK texture |
+
 ## FX (`fx/`)
 
-[`bus-fx.ck`](fx/bus-fx.ck): delay / reverb / crush wet-dry from `mainBus` → `dac`. Knobs: `fx_mix`, `fx_delay`, `fx_feedback`, `fx_reverb`, `fx_crush`.
+| File | Role |
+|------|------|
+| [`bus-fx.ck`](fx/bus-fx.ck) | Delay / reverb / crush wet-dry |
+| [`cyber-fx.ck`](fx/cyber-fx.ck) | Formant BPF wet chain (darkwave preset) |
+
+## Sequences (`sequences/`)
+
+Bundled patterns as **JSON** (Sequencer A/B) and **`.ck`** (transport / standalone shred). Import via **ChucK: Import Bundled Patterns** or project init → `.chuck-live/patterns/`. See [`sequences/README.md`](sequences/README.md).
 
 ## MiniBrute (`minibrute/`)
 
 [`voice.ck`](minibrute/voice.ck): mono voice; Open Sequencer → `mb_noteHz` + gate `mb_gate`.
 
-## Cyberpunk bus recipe
+## Darkwave cyberpunk preset
 
 1. Start VM  
-2. `master.ck` → `drums/kick.ck` + `hat.ck` + `snare.ck` → `minibrute/voice.ck` → `oscillators/sine.ck`  
+2. `master.ck` → `drums/cyber/*.ck` → `drums/bass.ck` → `voices/acid-bass.ck` → `voices/modem.ck`  
+3. `fx/cyber-fx.ck` (not `bus-fx.ck`)  
+4. Import patterns → Sequencer Load `cyberpunk-full.json` — Sync on, scale **phrygian**, BPM ~118  
+
+Full guide: [`cyberpunk/GUIDE.md`](cyberpunk/GUIDE.md). Short recipe: [`cyberpunk/README.md`](cyberpunk/README.md).
+
+## Legacy cyberpunk bus (classic drums)
+
+1. Start VM  
+2. `master.ck` → `drums/kick.ck` + `hat.ck` + `snare.ck` → `minibrute/voice.ck`  
 3. `fx/bus-fx.ck` (or `dac-out.ck` for dry)  
 4. Open Sequencer — Sync on, scale **phrygian**  
-5. Run drum gate tracks + `mb_noteHz` (and optional `sine_freq`)  
-6. Keep `master_amp` / module amps modest  
-
-See also [`cyberpunk/README.md`](cyberpunk/README.md).
 
 ## Annotations
 
@@ -192,7 +228,7 @@ global Event dk_kick;
 - **Swing** per track (0–100%); odd steps late — header **Swing** must be on (off by default)  
 - **Probability**: Shift+drag a gate pad (opacity shows chance)  
 - **M / S**: mute or solo without stopping the clock (unlike Stop)  
-- **Save As… / Load…**: named JSON under `.chuck-live/patterns/`
+- **Save As… / Load…**: JSON or `.ck` under `.chuck-live/patterns/` (init / **Import Bundled Patterns** seeds from `examples/sequences/`)
 
 ### Transport bus (`live_*`)
 

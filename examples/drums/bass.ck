@@ -4,6 +4,8 @@
 // IMPORTANT: the Event listener must NOT block for the full decay — otherwise
 // later seq steps are missed and a long boom feels "late" vs the playhead.
 // Pattern: `dk_bass => now` then immediately `spork ~ bassHit()` and loop.
+//
+// Mod matrix: ENV source + Pitch / Drive destinations (cross-route with voices).
 
 global Gain rackBus;
 global Gain bass_meter;
@@ -16,16 +18,36 @@ global Event dk_bass;             // sequencer gate track (pads only, no pitch)
 // @knob min=0 max=0.95 step=0.01 default=0.75
 global float dk_bass_amp;
 // @knob min=28 max=80 step=1 default=42
+// @modTarget label=Pitch unit=hz
 global float dk_bass_freq;        // sub landing pitch (Hz)
 // @knob min=80 max=900 step=5 default=480
 global float dk_bass_dec;         // boom length in ms
 // @knob min=0 max=1 step=0.01 default=0.35
+// @modTarget label=Drive
 global float dk_bass_drive;       // pre-LPF saturation
+
+// @modSource label=ENV bipolar=0
+global float dk_bass_envOut;
+
+global float dk_bass_freq_mod;
+global int dk_bass_freq_mod_src;
+global float dk_bass_freq_mod_depth;
+
+global float dk_bass_drive_mod;
+global int dk_bass_drive_mod_src;
+global float dk_bass_drive_mod_depth;
 
 0.75 => dk_bass_amp;
 42.0 => dk_bass_freq;
 480.0 => dk_bass_dec;
 0.35 => dk_bass_drive;
+0 => dk_bass_freq_mod_src;
+0.0 => dk_bass_freq_mod_depth;
+0 => dk_bass_drive_mod_src;
+0.0 => dk_bass_drive_mod_depth;
+
+float fLand;
+42.0 => fLand;
 
 SinOsc sub => ADSR env => Gain drive => LPF soft => Gain g => bass_meter => rackBus;
 SinOsc body => env;               // second osc shares same envelope
@@ -58,9 +80,22 @@ fun void _ckLivePeak() {
 
 fun void follow() {
   while (true) {
+    env.value() => dk_bass_envOut;
     dk_bass_amp => g.gain;
-    // soft clip-ish: gain into LPF for weight without harsh highs
-    1.0 + dk_bass_drive * 2.5 => drive.gain;
+
+    if (dk_bass_freq_mod_src == 0) {
+      dk_bass_freq => fLand;
+    } else {
+      Math.max(28.0, Math.min(120.0, dk_bass_freq + dk_bass_freq_mod * 40.0)) => fLand;
+    }
+
+    if (dk_bass_drive_mod_src == 0) {
+      1.0 + dk_bass_drive * 2.5 => drive.gain;
+    } else {
+      Math.max(0.0, Math.min(1.0, dk_bass_drive + dk_bass_drive_mod)) => float drv;
+      1.0 + drv * 2.5 => drive.gain;
+    }
+
     dk_bass_dec::ms => dur d;
     env.set(2::ms, d, 0.0, 80::ms);
     5::ms => now;
@@ -76,7 +111,7 @@ fun void onBass() {
 }
 
 fun void bassHit() {
-  dk_bass_freq * 3.5 => float f0;   // start much higher for 808 sweep
+  fLand * 3.5 => float f0;   // start much higher for 808 sweep
   f0 => sub.freq;
   f0 * 1.01 => body.freq;           // slight detune for thickness
   env.keyOn();
@@ -91,11 +126,11 @@ fun void drop(float f0) {
   // longer, deeper pitch fall than kick.ck — room-shaking boom
   for (0 => int i; i < 48; i++) {
     f0 * Math.pow(0.94, i) => float f;
-    if (f < dk_bass_freq) dk_bass_freq => f;   // don't go below knob pitch
+    if (f < fLand) fLand => f;   // don't go below modulated landing pitch
     f => sub.freq;
     f * 1.01 => body.freq;
     6::ms => now;
   }
-  dk_bass_freq => sub.freq;
-  dk_bass_freq * 1.01 => body.freq;
+  fLand => sub.freq;
+  fLand * 1.01 => body.freq;
 }

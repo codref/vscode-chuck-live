@@ -1,18 +1,26 @@
 # Cyberpunk bus recipe
 
-Modular stack (not the standalone [`../cyberpunk.ck`](../cyberpunk.ck)).
+Modular darkwave stack. Full performance guide: **[GUIDE.md](GUIDE.md)**.
 
 ## Load
 
-1. **ChucK: Start VM**  
-2. Add [`../oscillators/master.ck`](../oscillators/master.ck)  
-3. Add [`../drums/kick.ck`](../drums/kick.ck), [`hat.ck`](../drums/hat.ck), [`snare.ck`](../drums/snare.ck)  
-4. Add [`../minibrute/voice.ck`](../minibrute/voice.ck) (and optionally [`../oscillators/sine.ck`](../oscillators/sine.ck))  
-5. Add [`../fx/bus-fx.ck`](../fx/bus-fx.ck) **or** [`../out/dac-out.ck`](../out/dac-out.ck)  
-6. **Open Sequencer** — Sync clocks · scale phrygian · Run drum gates + `mb_noteHz`
+1. **ChucK: Start VM**
+2. [`../oscillators/master.ck`](../oscillators/master.ck)
+3. Cyber drums: [`../drums/cyber/`](../drums/cyber/) (all four)
+4. [`../drums/bass.ck`](../drums/bass.ck)
+5. [`../voices/acid-bass.ck`](../voices/acid-bass.ck)
+6. [`../voices/modem.ck`](../voices/modem.ck)
+7. [`../fx/cyber-fx.ck`](../fx/cyber-fx.ck) — not `bus-fx.ck`
+
+## Patterns
+
+- **ChucK: Import Bundled Patterns** → Sequencer **Load…** → `cyberpunk-full.json`
+- Or add [`../sequences/cyberpunk-full.ck`](../sequences/cyberpunk-full.ck) with Sync OFF
 
 ## Tips
 
-- Pull `master_amp` down when many modules run  
-- `fx_mix` ~0.2; raise crush slowly  
-- Hat/snare/kick are separate `@seqGate` tracks — use **M** to mute (or Stop) per track  
+- Scale **phrygian**, BPM ~118, Sync ON (Path A)
+- `master_cutoff` ~4500 Hz; `cf_mix` ~0.18
+- Mute per track in Sequencer for live arrangement
+
+Standalone all-in-one demo: [`../standalone/cyberpunk.ck`](../standalone/cyberpunk.ck)

@@ -2,7 +2,7 @@
   "name": "chuck-live",
   "displayName": "ChucK Live",
   "description": "Live coding for ChucK: VM control, shred load/unload, and annotated knobs over OSC",
-  "version": "0.3.23",
+  "version": "0.3.38",
   "publisher": "chuck-live",
   "engines": {
     "vscode": "^1.85.0"
@@ -119,6 +119,11 @@
         "title": "ChucK: Re-init Project Library (force)"
       },
       {
+        "command": "chuckLive.importBundledPatterns",
+        "title": "ChucK: Import Bundled Patterns",
+        "icon": "$(cloud-download)"
+      },
+      {
         "command": "chuckLive.showSession",
         "title": "ChucK: Show Session (Shreds)",
         "icon": "$(list-unordered)"
@@ -221,6 +226,11 @@
           "command": "chuckLive.initProject",
           "when": "view == chuckLive.control",
           "group": "navigation@4"
+        },
+        {
+          "command": "chuckLive.importBundledPatterns",
+          "when": "view == chuckLive.control",
+          "group": "navigation@5"
         },
         {
           "command": "chuckLive.refreshKnobs",
