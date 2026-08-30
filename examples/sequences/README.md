@@ -9,6 +9,7 @@ Bundled groove files for the cyberpunk / darkwave stack. Each preset ships as **
 | `darkwave-acid` | `cy_*` drums, `dk_bass`, `ab_noteHz`, `ab_accent` |
 | `modem-pulse` | `md_gate`, `md_digit` |
 | `cyberpunk-full` | All of the above |
+| `neural-matrix` | `nm_noteHz` plus accent, cutoff/fold/crush P-locks, slide, ratchet |
 
 ## Load order (before patterns)
 
@@ -18,6 +19,8 @@ Bundled groove files for the cyberpunk / darkwave stack. Each preset ships as **
 4. `voices/acid-bass.ck`
 5. `voices/modem.ck`
 6. `fx/cyber-fx.ck`
+
+Neural Matrix (standalone voice, not part of cyberpunk-full): `master.ck` → `voices/neural-matrix.ck` → `fx/cyber-fx.ck` (or `dac-out.ck`), then Load `neural-matrix.json`.
 
 ## Two workflows
 

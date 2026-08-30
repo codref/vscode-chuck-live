@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as vscode from 'vscode';
 import { getConfig } from './config';
 import { ChuckVm, runChuck, otfClientExecutable } from './chuckVm';
@@ -326,6 +327,35 @@ export class ShredOps {
     }
     this.syncManagedIdsFromShreds();
     await this.pruneOrphanManagedShreds();
+    await this.resetShredIds();
+  }
+
+  /**
+   * Collapse the VM shred ID counter to max(live)+1 after many short-lived sporks.
+   * Fire-and-forget one-shot shred (not tracked in the tree).
+   */
+  async resetShredIds(): Promise<void> {
+    if (!this.vm.running) {
+      return;
+    }
+    const outPath = path.join(os.tmpdir(), 'chuck-live-gc.ck');
+    try {
+      fs.writeFileSync(outPath, 'Machine.resetShredID();\n', 'utf8');
+    } catch (err) {
+      this.vm.output.appendLine(`[warn] resetShredID write: ${err}`);
+      return;
+    }
+    const { executable, otfPort } = getConfig();
+    const client = otfClientExecutable(executable);
+    try {
+      await runChuck(
+        client,
+        ['--silent', `--port:${otfPort}`, '+', outPath],
+        4000
+      );
+    } catch (err) {
+      this.vm.output.appendLine(`[warn] resetShredID: ${err}`);
+    }
   }
 
   private syncManagedIdsFromShreds(): void {
@@ -778,6 +808,9 @@ export class ShredOps {
     if (spork) {
       const id = Number(spork[1]);
       const sourceName = spork[2];
+      if (/chuck-live-gc\.ck/i.test(sourceName)) {
+        return;
+      }
       const existing = [...this.shreds.values()].find((s) =>
         sourceNameMatchesBase(sourceName, path.basename(s.source))
       );
@@ -804,7 +837,9 @@ export class ShredOps {
     }
     const id = Number(m[1]);
     const source = m[2];
-    const existing = this.shreds.get(id);
+    if (/chuck-live-gc\.ck/i.test(source)) {
+      return;
+    }    const existing = this.shreds.get(id);
     const abs = resolveChuckPath(source, existing?.source);
     const isBridge =
       abs.includes('chuck-live-bridge') ||

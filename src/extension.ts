@@ -170,6 +170,24 @@ export function activate(context: vscode.ExtensionContext): void {
   let shredFxRunning = false;
   /** Ignore shred list churn caused by our own managed OTF reloads. */
   let shredFxSuppress = false;
+  /** Periodic Machine.resetShredID while VM is up. */
+  let shredGcTimer: ReturnType<typeof setInterval> | undefined;
+
+  const stopShredGcTimer = (): void => {
+    if (shredGcTimer !== undefined) {
+      clearInterval(shredGcTimer);
+      shredGcTimer = undefined;
+    }
+  };
+
+  const startShredGcTimer = (): void => {
+    stopShredGcTimer();
+    shredGcTimer = setInterval(() => {
+      if (vm.running) {
+        void shredOps.resetShredIds();
+      }
+    }, 60_000);
+  };
 
   const runShredSideEffects = async (): Promise<void> => {
     if (!vm.running) {
@@ -278,6 +296,7 @@ export function activate(context: vscode.ExtensionContext): void {
     statusBar,
     { dispose: () => rack.dispose() },
     { dispose: () => seq.dispose() },
+    { dispose: () => stopShredGcTimer() },
     { dispose: () => oscServer.off('message', onMeterOsc) },
     vscode.window.createTreeView('chuckLive.sessionShreds', {
       treeDataProvider: tree,
@@ -300,6 +319,7 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vm.onStatusChange((on) => {
       if (!on) {
+        stopShredGcTimer();
         shredOps.clearLocal();
         rack.resetMeter();
         seq.resetTransportTracking();
@@ -399,10 +419,12 @@ export function activate(context: vscode.ExtensionContext): void {
       void revealSessionViews();
       vm.output.appendLine('[ok] VM start complete');
       await shredOps.reconcileShredIds();
+      startShredGcTimer();
       vscode.window.showInformationMessage('ChucK VM started');
     }),
 
     cmd('chuckLive.stopVm', async () => {
+      stopShredGcTimer();
       await vm.stop();
       rack.resetMeter();
       vscode.window.showInformationMessage('ChucK VM stopped');

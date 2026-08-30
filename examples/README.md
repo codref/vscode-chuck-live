@@ -53,7 +53,7 @@ fun void follow() {
 | `@modTarget` | Mod Matrix dest | `float` | Matrix writes offset; stack on `@knob` or dedicated `*_mod` global |
 | `@modRoute` | factory route | — | Standalone line: `src=LFO dst=Pitch default=1 depth=0.05` |
 
-**Mod matrix** — open the bottom-panel **Mod Matrix** view (`ChucK: Show Mod Matrix`). It is a **source × destination click grid**: columns are `@modSource` outputs, rows are `@modTarget` inputs (cross-module routing works when both are loaded). Click a cell to patch; click the lit cell again to clear; select a patched cell and use the depth slider for amount. When route `src` is `0`, the patch uses its internal default. See [`minibrute/voice.ck`](minibrute/voice.ck), [`voices/acid-bass.ck`](voices/acid-bass.ck), [`voices/modem.ck`](voices/modem.ck), [`drums/bass.ck`](drums/bass.ck), [`drums/cyber/bass-digital.ck`](drums/cyber/bass-digital.ck).
+**Mod matrix** — open the bottom-panel **Mod Matrix** view (`ChucK: Show Mod Matrix`). It is a **source × destination click grid**: columns are `@modSource` outputs, rows are `@modTarget` inputs (cross-module routing works when both are loaded). Click a cell to patch; click the lit cell again to clear; select a patched cell and use the depth slider for amount. When route `src` is `0`, the patch uses its internal default. See [`minibrute/voice.ck`](minibrute/voice.ck), [`voices/acid-bass.ck`](voices/acid-bass.ck), [`voices/neural-matrix.ck`](voices/neural-matrix.ck), [`voices/modem.ck`](voices/modem.ck), [`drums/bass.ck`](drums/bass.ck), [`drums/cyber/bass-digital.ck`](drums/cyber/bass-digital.ck).
 
 **Gate drums** — never block the listener for the full envelope; `spork` the hit:
 
@@ -163,6 +163,7 @@ Sequencer auto-adds `@seqGate` tracks (pads only). Run with Sync clocks for a lo
 |------|-----------|--------|
 | `tnt-riff.ck` | `tnt_noteHz`, `tnt_gate` | Power-chord stabs |
 | `acid-bass.ck` | `ab_noteHz`, `ab_accent`, `ab_gate` | 303-style monobass |
+| `neural-matrix.ck` | `nm_noteHz`, P-locks, `nm_gate` | Dual wavetable/FM bass + fold/crush macros |
 | `modem.ck` | `md_gate`, `md_digit` | DTMF / FSK texture |
 
 ## FX (`fx/`)

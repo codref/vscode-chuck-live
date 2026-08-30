@@ -90,6 +90,10 @@ body {
   flex-shrink: 0;
 }
 
+.hint.pending {
+  color: var(--play);
+}
+
 #tracks {
   flex: 1 1 0;
   min-height: 0;

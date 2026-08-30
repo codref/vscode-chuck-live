@@ -2,12 +2,13 @@ import * as vscode from 'vscode';
 import { getConfig } from './config';
 import { OscClient } from './oscClient';
 import { ShredOps } from './shredOps';
-import { writeBridgeFile, LIVE_TRANSPORT } from './bridgeGen';
+import { writeBridgeFile, LIVE_TRANSPORT, LIVE_SEQ } from './bridgeGen';
 import { collectModTargetsForBridge } from './modModel';
 import {
   writeTransportFile,
   TransportTrack,
   TransportSpec,
+  transportTopologyKey,
 } from './transportGen';
 import {
   exportCkPattern,
@@ -28,6 +29,10 @@ export interface SeqTransportDump {
   swingEnabled?: boolean;
   sharedPlayhead?: number;
   running?: boolean;
+  /** When true, arm pending→live copy on next bar wrap instead of immediate commit. */
+  applyAtBar?: boolean;
+  /** Flush a wrap-queued topology change — do not re-queue. */
+  forceOtf?: boolean;
   trackOrder?: string[];
   patterns?: Record<
     string,
@@ -60,6 +65,9 @@ export class SeqPanel {
   private lastTransportRunning = false;
   private lastTransportDump?: SeqTransportDump;
   private lastAppliedTransportSource = '';
+  private lastTopologyKey = '';
+  /** Topology OTF waiting for playhead wrap (15→0). */
+  private queuedTopologyDump?: SeqTransportDump;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -155,7 +163,9 @@ export class SeqPanel {
     this.lastTransportRunning = false;
     this.lastPlayheadStep = -1;
     this.lastAppliedTransportSource = '';
+    this.lastTopologyKey = '';
     this.pendingTransportDump = undefined;
+    this.queuedTopologyDump = undefined;
   }
 
   /** Handle /chuck/live_playhead from the transport shred (Sync ON only). */
@@ -170,6 +180,20 @@ export class SeqPanel {
     const s = ((Math.round(step) % 16) + 16) % 16;
     const wrapped = this.lastPlayheadStep === 15 && s === 0;
     this.lastPlayheadStep = s;
+    if (wrapped && this.queuedTopologyDump) {
+      const dump: SeqTransportDump = {
+        ...this.queuedTopologyDump,
+        sharedPlayhead: 0,
+        applyAtBar: false,
+        forceOtf: true,
+      };
+      this.queuedTopologyDump = undefined;
+      // Apply on the chain without coalescing through pendingTransportDump
+      // (a later dumpTransport would overwrite the wrap flush and re-queue forever).
+      this.transportApplyChain = this.transportApplyChain
+        .then(() => this.applyTransportDump(dump))
+        .catch(() => {});
+    }
     this.panel.webview.postMessage({
       type: 'playhead',
       step: s,
@@ -628,31 +652,126 @@ export class SeqPanel {
     };
   }
 
-  private buildStoppedTransportSpec(dump?: SeqTransportDump): TransportSpec {
-    const { meterPort } = getConfig();
-    const bpm = Math.max(
-      40,
-      Math.min(200, dump?.masterBpm ?? 120)
-    );
-    return {
-      bpm,
-      step: dump?.sharedPlayhead ?? 0,
-      running: false,
-      swingEnabled: false,
-      meterPort,
-      tracks: [],
-    };
+  /** OSC-patch pending pattern arrays + mute/solo/run/swing; arm or commit. */
+  private patchPatternOsc(dump: SeqTransportDump): void {
+    const { oscPort } = getConfig();
+    const host = '127.0.0.1';
+    const spec = this.buildTransportSpec(dump);
+    const tracks = spec.tracks;
+
+    for (let i = 0; i < 16; i++) {
+      const t = tracks[i];
+      if (!t) {
+        this.osc.send(host, oscPort, `/chuck/${LIVE_SEQ.run}`, [
+          { type: 'i', value: i },
+          { type: 'i', value: 0 },
+        ]);
+        continue;
+      }
+      const gates = pad16Local(t.gates, 0);
+      const vals = pad16Local(t.values, 0);
+      const probs = pad16Local(t.probs, 1);
+      for (let s = 0; s < 16; s++) {
+        this.osc.send(host, oscPort, `/chuck/${LIVE_SEQ.g}`, [
+          { type: 'i', value: i },
+          { type: 'i', value: s },
+          { type: 'i', value: gates[s] > 0.5 ? 1 : 0 },
+        ]);
+        this.osc.send(host, oscPort, `/chuck/${LIVE_SEQ.v}`, [
+          { type: 'i', value: i },
+          { type: 'i', value: s },
+          { type: 'f', value: vals[s] },
+        ]);
+        this.osc.send(host, oscPort, `/chuck/${LIVE_SEQ.p}`, [
+          { type: 'i', value: i },
+          { type: 'i', value: s },
+          { type: 'f', value: probs[s] },
+        ]);
+      }
+      this.osc.send(host, oscPort, `/chuck/${LIVE_SEQ.muted}`, [
+        { type: 'i', value: i },
+        { type: 'i', value: t.muted ? 1 : 0 },
+      ]);
+      this.osc.send(host, oscPort, `/chuck/${LIVE_SEQ.solo}`, [
+        { type: 'i', value: i },
+        { type: 'i', value: t.solo ? 1 : 0 },
+      ]);
+      this.osc.send(host, oscPort, `/chuck/${LIVE_SEQ.run}`, [
+        { type: 'i', value: i },
+        { type: 'i', value: t.running ? 1 : 0 },
+      ]);
+      this.osc.send(host, oscPort, `/chuck/${LIVE_SEQ.swingAmt}`, [
+        { type: 'i', value: i },
+        { type: 'f', value: t.swing },
+      ]);
+    }
+
+    const applyAtBar = dump.applyAtBar === true && !!dump.running;
+    if (applyAtBar) {
+      this.osc.sendInt(host, oscPort, `/chuck/${LIVE_SEQ.armed}`, 1);
+      this.osc.sendInt(host, oscPort, `/chuck/${LIVE_SEQ.commit}`, 0);
+    } else {
+      this.osc.sendInt(host, oscPort, `/chuck/${LIVE_SEQ.commit}`, 1);
+      this.osc.sendInt(host, oscPort, `/chuck/${LIVE_SEQ.armed}`, 0);
+    }
+  }
+
+  private async otfLoadTransport(dump: SeqTransportDump): Promise<void> {
+    const chuckOwnsClock = dump.syncClocks !== false;
+    const running = chuckOwnsClock ? !!dump.running : false;
+    // Keep track topology even when stopped — stop is OSC-only after first load.
+    const spec = this.buildTransportSpec({
+      ...dump,
+      running: chuckOwnsClock ? dump.running : false,
+    });
+    // If nothing to sequence and never started, keep a quiet clock shred.
+    if (!spec.tracks.length && !this.lastTopologyKey) {
+      spec.running = false;
+    }
+    const file = writeTransportFile(spec);
+    if (file.source === this.lastAppliedTransportSource) {
+      this.lastTopologyKey = transportTopologyKey(spec.tracks);
+      return;
+    }
+    this.lastAppliedTransportSource = file.source;
+    this.lastTopologyKey = transportTopologyKey(spec.tracks);
+    try {
+      await this.onTransportNeeded(file.path, file.source);
+    } catch (err) {
+      console.warn('transport reload skipped:', err);
+    }
+    // Re-assert bus after OTF (pattern already baked; still push run/cmd).
+    this.publishTransportBus({
+      bpm: dump.masterBpm,
+      step: dump.sharedPlayhead ?? 0,
+      running: chuckOwnsClock ? dump.running : false,
+      swingEnabled: dump.swingEnabled,
+    });
+    if (chuckOwnsClock && running) {
+      const { oscPort } = getConfig();
+      this.osc.sendInt(
+        '127.0.0.1',
+        oscPort,
+        `/chuck/${LIVE_TRANSPORT.cmd}`,
+        1
+      );
+    }
   }
 
   private async applyTransportDump(dump: SeqTransportDump): Promise<void> {
     this.lastTransportDump = dump;
     const chuckOwnsClock = dump.syncClocks !== false;
     const running = chuckOwnsClock ? !!dump.running : false;
+    const wasRunning = this.lastTransportRunning;
     this.lastTransportRunning = running;
 
     this.publishTransportBus({
       bpm: dump.masterBpm,
-      step: dump.sharedPlayhead,
+      // Don't rewind ChucK's playhead while the clock is (or was) running.
+      step:
+        chuckOwnsClock && (wasRunning || running)
+          ? undefined
+          : dump.sharedPlayhead,
       running: chuckOwnsClock ? dump.running : false,
       swingEnabled: dump.swingEnabled,
     });
@@ -666,21 +785,44 @@ export class SeqPanel {
       );
     }
 
-    // Running + sync on → bake patterns; otherwise idle transport (stable across shred adds).
-    const spec =
-      chuckOwnsClock && running
-        ? this.buildTransportSpec(dump)
-        : this.buildStoppedTransportSpec(dump);
-    const file = writeTransportFile(spec);
-    if (file.source === this.lastAppliedTransportSource) {
+    // Sync-off: host owns clocks — no ChucK pattern transport needed.
+    if (!chuckOwnsClock) {
       return;
     }
-    this.lastAppliedTransportSource = file.source;
-    try {
-      await this.onTransportNeeded(file.path, file.source);
-    } catch (err) {
-      console.warn('transport reload skipped:', err);
+
+    const spec = this.buildTransportSpec(dump);
+    const topo = transportTopologyKey(spec.tracks);
+    const hasTransport = !!this.lastTopologyKey;
+
+    // Same topology already loaded → OSC patch only (no clock replace).
+    if (hasTransport && topo === this.lastTopologyKey) {
+      this.patchPatternOsc(dump);
+      return;
     }
+
+    // Topology changed while running → queue OTF for next bar wrap
+    // (unless this dump is the wrap flush itself).
+    if (
+      hasTransport &&
+      wasRunning &&
+      running &&
+      topo !== this.lastTopologyKey &&
+      !dump.forceOtf
+    ) {
+      this.queuedTopologyDump = dump;
+      this.panel?.webview.postMessage({
+        type: 'topologyQueued',
+      });
+      return;
+    }
+
+    // First load, stop→start with new tracks, or stopped topology change → OTF now.
+    await this.otfLoadTransport(dump);
+    // After OTF, patterns are already live; clear arm/commit noise.
+    const { oscPort } = getConfig();
+    this.osc.sendInt('127.0.0.1', oscPort, `/chuck/${LIVE_SEQ.armed}`, 0);
+    this.osc.sendInt('127.0.0.1', oscPort, `/chuck/${LIVE_SEQ.commit}`, 0);
+    this.panel?.webview.postMessage({ type: 'topologyApplied' });
   }
 
   private enqueueTransportDump(dump: SeqTransportDump): void {
@@ -706,21 +848,15 @@ export class SeqPanel {
     const tracksIdle =
       !dump.trackOrder?.length ||
       dump.trackOrder.every((n) => !dump.patterns?.[n]?.running);
-    // Ignore redundant stop dumps (shred add used to spam these via pushTargets).
+    // Ignore redundant stop dumps when already stopped and no tracks armed.
     if (!running && this.lastTransportRunning === false && tracksIdle) {
-      return;
+      // Still allow pattern/topology patches while stopped if we have a transport.
+      if (!this.lastTopologyKey) {
+        return;
+      }
     }
-    // Claim stop state before async apply so parallel dumps coalesce.
-    if (!running) {
-      this.lastTransportRunning = false;
-    }
-    // Stop / sync-off must apply immediately.
-    if (!chuckOwnsClock || !running) {
-      this.enqueueTransportDump(dump);
-      return;
-    }
-    // Start must not wait on debounce.
-    if (running && this.lastTransportRunning !== true) {
+    // Stop / sync-off / first start: apply soon.
+    if (!chuckOwnsClock || !running || this.lastTransportRunning !== true) {
       this.enqueueTransportDump(dump);
       return;
     }
@@ -841,6 +977,9 @@ export class SeqPanel {
       <label class="pick sync" title="When off, all tracks fire on the straight grid">
         <input type="checkbox" id="swingEnabled" /> Swing
       </label>
+      <label class="pick sync" title="Queue pattern edits until the next 16-step wrap (no mid-bar change)">
+        <input type="checkbox" id="applyAtBar" checked /> Apply at bar
+      </label>
       <select id="addTarget" title="Parameter to sequence"></select>
       <button type="button" id="btnAdd">Add track</button>
       <button type="button" id="btnRunAll">Run all</button>
@@ -863,4 +1002,12 @@ function midiToHz(midi: number): number {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function pad16Local(arr: number[] | undefined, fill: number): number[] {
+  const out = (arr ?? []).slice(0, 16);
+  while (out.length < 16) {
+    out.push(fill);
+  }
+  return out;
 }

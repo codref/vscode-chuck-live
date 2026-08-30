@@ -69,6 +69,15 @@ const ab_accent = [1, 0, 0.7, 0, 1, 0, 0.5, 0, 1, 0, 0.6, 0, 1, 0, 0.8, 0.5];
 const md_gate_g = [1,0,0,1, 0,1,0,0, 1,1,0,1, 0,0,1,0];
 const md_digit_v = [0,0,0,1, 0,2,0,0, 3,4,0,5, 0,0,6,0];
 
+const nm_gates = [1,1,1,1, 1,1,1,0, 1,1,1,1, 1,1,1,1];
+const nm_notes = [40,40,40,28, 40,43,40,0, 35,40,43,40, 47,40,36,40];
+const nm_accent = [1,0,0.6,1, 0,0.7,0,0, 1,0,0.5,0, 1,0,0.8,0.4];
+const nm_plockCut = [0.3,0.2,0.4,0.8, 0.2,0.5,0.3,0, 0.6,0.3,0.4,0.2, 0.9,0.3,0.7,0.4];
+const nm_plockFold = [0.4,0.2,0.3,0.7, 0.2,0.4,0.3,0, 0.5,0.2,0.4,0.2, 0.8,0.3,0.5,0.4];
+const nm_plockCrush = [0.2,0.1,0.2,0.6, 0.1,0.3,0.2,0, 0.4,0.1,0.2,0.1, 0.7,0.2,0.5,0.3];
+const nm_slide = [0,1,0,0, 0,1,0,0, 0,1,1,0, 0,0,0,0];
+const nm_ratchet = [1,1,1,4, 1,1,1,1, 1,1,1,1, 8,1,2,1];
+
 const darkwavePatterns = {
   cy_kick: gateTrack('cy_kick', cy_kick_g),
   cy_hat: gateTrack('cy_hat', cy_hat_g),
@@ -85,6 +94,16 @@ const modemPatterns = {
 };
 
 const fullPatterns = { ...darkwavePatterns, ...modemPatterns };
+
+const neuralPatterns = {
+  nm_noteHz: floatTrack('nm_noteHz', nm_notes, nm_gates, 'nm_gate', 'midi'),
+  nm_accent: floatTrack('nm_accent', nm_accent, nm_gates, 'nm_gate', 'raw'),
+  nm_plockCut: floatTrack('nm_plockCut', nm_plockCut, nm_gates, 'nm_gate', 'raw'),
+  nm_plockFold: floatTrack('nm_plockFold', nm_plockFold, nm_gates, 'nm_gate', 'raw'),
+  nm_plockCrush: floatTrack('nm_plockCrush', nm_plockCrush, nm_gates, 'nm_gate', 'raw'),
+  nm_slide: floatTrack('nm_slide', nm_slide, nm_gates, 'nm_gate', 'raw'),
+  nm_ratchet: floatTrack('nm_ratchet', nm_ratchet, nm_gates, 'nm_gate', 'raw'),
+};
 
 function buildJson(name, trackOrder, patterns) {
   return {
@@ -217,6 +236,7 @@ const presets = [
   { name: 'darkwave-acid', trackOrder: Object.keys(darkwavePatterns), patterns: darkwavePatterns },
   { name: 'modem-pulse', trackOrder: Object.keys(modemPatterns), patterns: modemPatterns },
   { name: 'cyberpunk-full', trackOrder: Object.keys(fullPatterns), patterns: fullPatterns },
+  { name: 'neural-matrix', trackOrder: Object.keys(neuralPatterns), patterns: neuralPatterns },
 ];
 
 for (const p of presets) {

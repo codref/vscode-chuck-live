@@ -166,6 +166,83 @@ export function parseCkPattern(source: string): PatternSnapshot | null {
       continue;
     }
 
+    // New live_seq_* seed format (index = track*16+step).
+    const gSeed = line.match(
+      /^(\d+)\s*=>\s*live_seq_g\[(\d+)\];/
+    );
+    if (gSeed) {
+      const idx = parseInt(gSeed[2], 10);
+      const tr = Math.floor(idx / 16);
+      const st = idx % 16;
+      const t = trackInfo.get(tr);
+      if (t && st < 16) {
+        t.gates[st] = parseInt(gSeed[1], 10) > 0 ? 1 : 0;
+      }
+      continue;
+    }
+    const vSeed = line.match(
+      /^(-?\d+(?:\.\d+)?)\s*=>\s*live_seq_v\[(\d+)\];/
+    );
+    if (vSeed) {
+      const idx = parseInt(vSeed[2], 10);
+      const tr = Math.floor(idx / 16);
+      const st = idx % 16;
+      const t = trackInfo.get(tr);
+      if (t && st < 16) {
+        t.values[st] = parseFloat(vSeed[1]);
+      }
+      continue;
+    }
+    const pSeed = line.match(
+      /^(-?\d+(?:\.\d+)?)\s*=>\s*live_seq_p\[(\d+)\];/
+    );
+    if (pSeed) {
+      const idx = parseInt(pSeed[2], 10);
+      const tr = Math.floor(idx / 16);
+      const st = idx % 16;
+      const t = trackInfo.get(tr);
+      if (t && st < 16) {
+        t.probs[st] = parseFloat(pSeed[1]);
+      }
+      continue;
+    }
+
+    const swingNew = line.match(
+      /^(-?\d+(?:\.\d+)?)\s*=>\s*live_seq_swing\[(\d+)\];/
+    );
+    if (swingNew) {
+      const t = trackInfo.get(parseInt(swingNew[2], 10));
+      if (t) {
+        t.swing = parseFloat(swingNew[1]);
+      }
+      continue;
+    }
+    const mutedNew = line.match(/^(\d+)\s*=>\s*live_seq_muted\[(\d+)\];/);
+    if (mutedNew) {
+      const t = trackInfo.get(parseInt(mutedNew[2], 10));
+      if (t) {
+        t.muted = mutedNew[1] === '1';
+      }
+      continue;
+    }
+    const soloNew = line.match(/^(\d+)\s*=>\s*live_seq_solo\[(\d+)\];/);
+    if (soloNew) {
+      const t = trackInfo.get(parseInt(soloNew[2], 10));
+      if (t) {
+        t.solo = soloNew[1] === '1';
+      }
+      continue;
+    }
+    const runNew = line.match(/^(\d+)\s*=>\s*live_seq_run\[(\d+)\];/);
+    if (runNew) {
+      const t = trackInfo.get(parseInt(runNew[2], 10));
+      if (t) {
+        t.running = runNew[1] === '1';
+      }
+      continue;
+    }
+
+    // Legacy tN_* format.
     const swingM = line.match(/^(\d+(?:\.\d+)?)\s*=>\s*float\s+t(\d+)_swing;/);
     if (swingM) {
       const t = trackInfo.get(parseInt(swingM[2], 10));

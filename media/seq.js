@@ -24,9 +24,12 @@
   let syncClocks = saved.syncClocks !== undefined ? !!saved.syncClocks : true;
   /** Master kill-switch: when false, all swing delays are ignored. */
   let swingEnabled = saved.swingEnabled === true;
+  /** Queue pattern OSC until next 16-step wrap (default on). */
+  let applyAtBar = saved.applyAtBar !== undefined ? !!saved.applyAtBar : true;
   let sharedPlayhead = 0;
   /** @type {any} */
   let masterTimer = null;
+  let patternPendingHint = false;
 
   /** @type {Array<any>} */
   let targets = [];
@@ -49,6 +52,7 @@
   const masterBpmIn = document.getElementById('masterBpm');
   const syncChk = document.getElementById('syncClocks');
   const swingEnableChk = document.getElementById('swingEnabled');
+  const applyAtBarChk = document.getElementById('applyAtBar');
 
   const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
@@ -84,6 +88,7 @@
       masterBpm: masterBpm,
       syncClocks: syncClocks,
       swingEnabled: swingEnabled,
+      applyAtBar: applyAtBar,
     });
   }
 
@@ -155,10 +160,15 @@
         swingEnabled: swingEnabled,
         sharedPlayhead: step,
         running: running,
+        applyAtBar: applyAtBar && running,
         trackOrder: trackOrder.slice(),
         patterns: pat,
       },
     });
+    if (applyAtBar && running && useChuckClock()) {
+      patternPendingHint = true;
+      updateHint();
+    }
   }
 
   let dumpTimer = null;
@@ -1183,6 +1193,7 @@
     ensurePattern(t);
     trackOrder.push(name);
     persist();
+    dumpTransportSoon();
     render();
   }
 
@@ -1198,23 +1209,32 @@
 
   function syncPreferredTracks() {
     let changed = false;
-    for (const t of targets) {
-      if (t.preferred && trackOrder.indexOf(t.name) < 0) {
-        ensurePattern(t);
-        trackOrder.push(t.name);
-        changed = true;
+    const clockRunning = useChuckClock() && anyTrackRunning();
+    // While the sequence is playing, do not auto-add preferred tracks —
+    // that forces a topology OTF and drops audio. New shreds stay in Add.
+    if (!clockRunning) {
+      for (const t of targets) {
+        if (t.preferred && trackOrder.indexOf(t.name) < 0) {
+          ensurePattern(t);
+          trackOrder.push(t.name);
+          changed = true;
+        }
       }
     }
     const names = new Set(targets.map((t) => t.name));
     const next = trackOrder.filter((n) => names.has(n));
     if (next.length !== trackOrder.length) {
       for (const n of trackOrder) {
-        if (!names.has(n)) stopClock(n);
+        if (!names.has(n)) {
+          stopClock(n);
+          if (patterns[n]) patterns[n].running = false;
+        }
       }
       trackOrder = next;
       changed = true;
     }
     if (changed) persist();
+    return changed;
   }
 
   function trackAudible(name) {
@@ -1416,7 +1436,8 @@
       stopClock(name);
       p.bpm = masterBpm;
       if (useChuckClock()) {
-        sharedPlayhead = p.playhead || 0;
+        // Join the shared playhead — never rewind the ChucK clock mid-session.
+        p.playhead = sharedPlayhead;
         startMasterTimer(true);
         return;
       }
@@ -1712,11 +1733,19 @@
     btnRun.className = 'btn-run' + (p.running ? ' active' : '');
     btnRun.textContent = 'Run';
     btnRun.addEventListener('click', () => {
+      const othersRunning = trackOrder.some(
+        (n) => n !== name && patterns[n] && patterns[n].running
+      );
       p.running = true;
       setEditBank(p, p.activeBank);
       if (syncClocks) {
-        sharedPlayhead = 0;
-        p.playhead = 0;
+        if (!othersRunning) {
+          sharedPlayhead = 0;
+          p.playhead = 0;
+        } else {
+          // Join in place — Apply at bar queues the run flag until wrap.
+          p.playhead = sharedPlayhead;
+        }
       } else {
         p.playhead = 0;
       }
@@ -1911,6 +1940,7 @@
     if (masterBpmIn) masterBpmIn.value = String(masterBpm);
     if (syncChk) syncChk.checked = syncClocks;
     if (swingEnableChk) swingEnableChk.checked = swingEnabled;
+    if (applyAtBarChk) applyAtBarChk.checked = applyAtBar;
 
     if (!trackOrder.length) {
       const empty = document.createElement('div');
@@ -1926,23 +1956,33 @@
       }
     }
 
-    if (hintEl) {
-      hintEl.textContent =
-        (syncClocks
-          ? 'Sync ON · ChucK clock · ' + masterBpm + ' BPM · '
-          : 'Independent host clocks · ') +
-        'scale ' +
-        scaleName +
-        ' · ' +
-        trackOrder.length +
-        ' track(s) · M/S mute/solo · Shift+drag gate = probability · swing ' +
-        (swingEnabled ? 'ON' : 'OFF') +
-        ' · transforms below each grid · edit bank only · Undo per track · patterns in .chuck-live/patterns/';
-    }
-
+    updateHint();
     for (const name of trackOrder) {
       updatePlayhead(name);
     }
+  }
+
+  function updateHint() {
+    if (!hintEl) return;
+    let text =
+      (syncClocks
+        ? 'Sync ON · ChucK clock · ' + masterBpm + ' BPM · '
+        : 'Independent host clocks · ') +
+      'scale ' +
+      scaleName +
+      ' · ' +
+      trackOrder.length +
+      ' track(s) · M/S mute/solo · Shift+drag gate = probability · swing ' +
+      (swingEnabled ? 'ON' : 'OFF') +
+      (useChuckClock()
+        ? ' · apply ' + (applyAtBar ? 'at bar' : 'realtime')
+        : '') +
+      ' · transforms below each grid · edit bank only · Undo per track · patterns in .chuck-live/patterns/';
+    if (patternPendingHint && applyAtBar && anyTrackRunning()) {
+      text = 'queued — applies at bar · ' + text;
+    }
+    hintEl.textContent = text;
+    hintEl.classList.toggle('pending', !!patternPendingHint && applyAtBar);
   }
 
   function resyncRunning(fireNow) {
@@ -2108,12 +2148,13 @@
   }
   if (btnRunAll) {
     btnRunAll.addEventListener('click', () => {
-      sharedPlayhead = 0;
+      const already = anyTrackRunning();
+      if (!already) sharedPlayhead = 0;
       for (const name of trackOrder) {
         const p = patterns[name];
         if (!p) continue;
         p.running = true;
-        p.playhead = 0;
+        p.playhead = already ? sharedPlayhead : 0;
         setEditBank(p, p.activeBank);
       }
       resyncRunning(true);
@@ -2207,6 +2248,14 @@
       render();
     });
   }
+  if (applyAtBarChk) {
+    applyAtBarChk.addEventListener('change', () => {
+      applyAtBar = !!applyAtBarChk.checked;
+      if (!applyAtBar) patternPendingHint = false;
+      persist();
+      updateHint();
+    });
+  }
 
   window.addEventListener('message', (event) => {
     const msg = event.data;
@@ -2223,15 +2272,28 @@
         .sort()
         .join('\0');
       const targetsChanged = prevNames !== nextNames;
-      syncPreferredTracks();
+      const orderChanged = syncPreferredTracks();
       render();
-      if (targetsChanged) {
-        resyncRunning(anyTrackRunning());
+      if (targetsChanged || orderChanged) {
+        if (useChuckClock()) {
+          // Soft update: OSC patch / queue topology — never resyncRunning (OTF bump).
+          if (anyTrackRunning() || orderChanged) dumpTransportSoon();
+        } else {
+          resyncRunning(anyTrackRunning());
+        }
       } else if (useChuckClock() && anyTrackRunning()) {
-        // Bridge-only refresh — re-push live_* OSC, do not OTF-replace transport.
         publishTransport({ bpm: masterBpm, step: sharedPlayhead });
       }
-      // targets unchanged + not running → leave transport alone
+      return;
+    }
+    if (msg.type === 'topologyQueued') {
+      patternPendingHint = true;
+      updateHint();
+      return;
+    }
+    if (msg.type === 'topologyApplied') {
+      patternPendingHint = false;
+      updateHint();
       return;
     }
     if (msg.type === 'patternLoaded' && msg.data) {
@@ -2245,6 +2307,8 @@
       const prev = sharedPlayhead;
       sharedPlayhead = step;
       if (msg.wrapped || (prev === 15 && step === 0)) {
+        patternPendingHint = false;
+        updateHint();
         let swapped = false;
         for (const name of trackOrder) {
           const p = patterns[name];
