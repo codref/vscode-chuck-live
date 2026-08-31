@@ -25,6 +25,7 @@ import { buildModulesFromShreds } from './rackModel';
 import { RackPanel } from './rackPanel';
 import { SeqPanel } from './seqPanel';
 import { WiringPanelProvider } from './wiringPanel';
+import { generateVoiceSampleCommand } from './voiceSample';
 import {
   runInitProjectCommand,
   importBundledPatternsCommand,
@@ -592,6 +593,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
     cmd('chuckLive.importBundledPatterns', async () => {
       await importBundledPatternsCommand(context.extensionPath);
+    }),
+
+    cmd('chuckLive.generateVoiceSample', async () => {
+      await generateVoiceSampleCommand(context.extensionPath);
     })
   );
 

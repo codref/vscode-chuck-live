@@ -10,6 +10,8 @@ Bundled groove files for the cyberpunk / darkwave stack. Each preset ships as **
 | `modem-pulse` | `md_gate`, `md_digit` |
 | `cyberpunk-full` | All of the above |
 | `neural-matrix` | `nm_noteHz` plus accent, cutoff/fold/crush P-locks, slide, ratchet |
+| `doom-vox` | `dv_noteHz`, `dv_accent`, `dv_chop` (sparse doom vocal) |
+| `doom-vox-dual` | `rm_gate`, `cy_gate` — two slot wrappers on different steps |
 
 ## Load order (before patterns)
 
@@ -21,6 +23,8 @@ Bundled groove files for the cyberpunk / darkwave stack. Each preset ships as **
 6. `fx/cyber-fx.ck`
 
 Neural Matrix (standalone voice, not part of cyberpunk-full): `master.ck` → `voices/neural-matrix.ck` → `fx/cyber-fx.ck` (or `dac-out.ck`), then Load `neural-matrix.json`.
+
+Doom voice (standalone): `master.ck` → `voices/doom-vox.ck` → `fx/cyber-fx.ck`. Generate WAV via **ChucK: Generate Voice Sample**, Reload shred, Load `doom-vox.json`. Modes: `dv_mode` 0/1/2.
 
 ## Two workflows
 

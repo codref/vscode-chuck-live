@@ -105,6 +105,31 @@ const neuralPatterns = {
   nm_ratchet: floatTrack('nm_ratchet', nm_ratchet, nm_gates, 'nm_gate', 'raw'),
 };
 
+// Sparse doom vocal — low density, phrygian roots, chop automation
+const dv_gates = [1,0,0,0, 0,0,1,0, 0,0,0,0, 1,0,0,0];
+const dv_notes = [40,40,40,40, 35,35,43,43, 40,40,28,28, 47,40,35,40];
+const dv_accent = [1,0,0,0, 0,0,0.7,0, 0,0,0,0, 0.85,0,0,0];
+const dv_chop = [0,0,0,0, 0.2,0.2,0.35,0.35, 0,0,0.5,0.5, 0.15,0.15,0.4,0.4];
+
+const doomVoxPatterns = {
+  dv_noteHz: floatTrack('dv_noteHz', dv_notes, dv_gates, 'dv_gate', 'midi'),
+  dv_accent: floatTrack('dv_accent', dv_accent, dv_gates, 'dv_gate', 'raw'),
+  dv_chop: floatTrack('dv_chop', dv_chop, dv_gates, 'dv_gate', 'raw'),
+};
+
+// Dual slot voices — independent gates on alternating steps
+const rm_gates = [1,0,0,0, 0,0,1,0, 0,0,0,0, 1,0,0,0];
+const cy_gates = [0,0,1,0, 1,0,0,0, 0,1,0,0, 0,0,1,0];
+const rm_accent = [1,0,0,0, 0,0,0.8,0, 0,0,0,0, 0.9,0,0,0];
+const cy_accent = [0,0,0.7,0, 1,0,0,0, 0,0.6,0,0, 0,0,0.75,0];
+
+const doomVoxDualPatterns = {
+  rm_gate: gateTrack('rm_gate', rm_gates),
+  rm_accent: floatTrack('rm_accent', rm_accent, rm_gates, 'rm_gate', 'raw'),
+  cy_gate: gateTrack('cy_gate', cy_gates),
+  cy_accent: floatTrack('cy_accent', cy_accent, cy_gates, 'cy_gate', 'raw'),
+};
+
 function buildJson(name, trackOrder, patterns) {
   return {
     version: 1,
@@ -237,6 +262,8 @@ const presets = [
   { name: 'modem-pulse', trackOrder: Object.keys(modemPatterns), patterns: modemPatterns },
   { name: 'cyberpunk-full', trackOrder: Object.keys(fullPatterns), patterns: fullPatterns },
   { name: 'neural-matrix', trackOrder: Object.keys(neuralPatterns), patterns: neuralPatterns },
+  { name: 'doom-vox', trackOrder: Object.keys(doomVoxPatterns), patterns: doomVoxPatterns },
+  { name: 'doom-vox-dual', trackOrder: Object.keys(doomVoxDualPatterns), patterns: doomVoxDualPatterns },
 ];
 
 for (const p of presets) {

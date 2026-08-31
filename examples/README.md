@@ -165,6 +165,12 @@ Sequencer auto-adds `@seqGate` tracks (pads only). Run with Sync clocks for a lo
 | `acid-bass.ck` | `ab_noteHz`, `ab_accent`, `ab_gate` | 303-style monobass |
 | `neural-matrix.ck` | `nm_noteHz`, P-locks, `nm_gate` | Dual wavetable/FM bass + fold/crush macros |
 | `modem.ck` | `md_gate`, `md_digit` | DTMF / FSK texture |
+| `doom-vox.ck` | `dv_noteHz`, `dv_accent`, `dv_chop`, `dv_gate` | edge-tts sample: vocoder / pitched / oneshot |
+| `doom-vox-slot.ck` | copy template → unique `xx_gate` | Lite oneshot wrapper (~130 lines); see [`voices/slots/README.md`](voices/slots/README.md) |
+| `slots/doom-cyber.ck` | `cy_gate` | Example slot → `cyber.wav` |
+| `slots/doom-remember.ck` | `rm_gate` | Example slot → `doom-vox.wav` |
+
+**Doom voice** — load `master.ck` → `voices/doom-vox.ck` → `fx/cyber-fx.ck`. WAVs live in `voices/samples/`. **Generate Voice Sample** writes a new file; add its filename to `dv_sampleNames[]` in `doom-vox.ck` and bump the `dv_sample` knob `max`, then **Reload** once. Switch phrases live with the **`dv_sample`** knob (no second shred). **Two phrases on different steps:** copy [`doom-vox-slot.ck`](voices/doom-vox-slot.ck), load each slot shred, pattern `doom-vox-dual.json`. Pattern: Load `doom-vox.json` or `doom-vox-dual.json`.
 
 ## FX (`fx/`)
 

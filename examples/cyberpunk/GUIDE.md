@@ -111,6 +111,18 @@ Sequencer tracks: `ab_noteHz` (pitch), `ab_accent` (0–1 per step, shared gate)
 
 ---
 
+## 6b. Doom voice (optional layer)
+
+Standalone sample voice — not part of `cyberpunk-full`.
+
+1. **ChucK: Generate Voice Sample** (needs `edge-tts` + `ffmpeg`; set `chuckLive.edgeTtsExecutable` / `ffmpegExecutable` if not on PATH) → writes `voices/samples/doom-vox.wav`
+2. Load `voices/doom-vox.ck` after master; keep `cyber-fx.ck`
+3. **Reload** shred after generating; Sequencer Load `doom-vox.json`
+4. `dv_mode`: **0** FFT vocoder, **1** pitched sample + synth, **2** phrase one-shot
+5. Darken with `dv_formant` ~900–1400, `dv_cutoff` ~1200, `dv_drive` up; sparse gates only
+
+---
+
 ## 7. Sequencer techniques
 
 - **A/B banks**: Dup→standby, edit B while A plays, Queue at bar end

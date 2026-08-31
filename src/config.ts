@@ -24,6 +24,9 @@ export function getConfig() {
     meterPort: c.get<number>('meterPort', 9001),
     vmArgs: c.get<string[]>('vmArgs', []),
     saveBeforeAdd: c.get<boolean>('saveBeforeAdd', true),
+    edgeTtsExecutable: (c.get<string>('edgeTtsExecutable', 'edge-tts') || 'edge-tts').trim(),
+    ffmpegExecutable: (c.get<string>('ffmpegExecutable', 'ffmpeg') || 'ffmpeg').trim(),
+    edgeTtsVoice: (c.get<string>('edgeTtsVoice', 'en-US-GuyNeural') || 'en-US-GuyNeural').trim(),
   };
 }
 

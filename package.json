@@ -2,7 +2,7 @@
   "name": "chuck-live",
   "displayName": "ChucK Live",
   "description": "Live coding for ChucK: VM control, shred load/unload, and annotated knobs over OSC",
-  "version": "0.3.41",
+  "version": "0.3.47",
   "publisher": "chuck-live",
   "engines": {
     "vscode": "^1.85.0"
@@ -16,7 +16,8 @@
     "onView:chuckLive.control",
     "onView:chuckLive.sessionShreds",
     "onView:chuckLive.knobs",
-    "onView:chuckLive.wiring"
+    "onView:chuckLive.wiring",
+    "onCommand:chuckLive.generateVoiceSample"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -132,6 +133,11 @@
         "command": "chuckLive.showWiring",
         "title": "ChucK: Show Mod Matrix",
         "icon": "$(git-merge)"
+      },
+      {
+        "command": "chuckLive.generateVoiceSample",
+        "title": "ChucK: Generate Voice Sample",
+        "icon": "$(mic)"
       }
     ],
     "keybindings": [
@@ -231,6 +237,11 @@
           "command": "chuckLive.importBundledPatterns",
           "when": "view == chuckLive.control",
           "group": "navigation@5"
+        },
+        {
+          "command": "chuckLive.generateVoiceSample",
+          "when": "view == chuckLive.control",
+          "group": "navigation@6"
         },
         {
           "command": "chuckLive.refreshKnobs",
@@ -352,6 +363,21 @@
           "type": "string",
           "default": "chuck",
           "description": "Default folder name when running ChucK: Init Project Library"
+        },
+        "chuckLive.edgeTtsExecutable": {
+          "type": "string",
+          "default": "edge-tts",
+          "description": "edge-tts binary for ChucK: Generate Voice Sample. Use an absolute path if it is not on PATH (e.g. ~/.local/bin/edge-tts)."
+        },
+        "chuckLive.ffmpegExecutable": {
+          "type": "string",
+          "default": "ffmpeg",
+          "description": "ffmpeg binary used to convert TTS audio to mono 44.1 kHz WAV for doom-vox.ck. Absolute path if not on PATH."
+        },
+        "chuckLive.edgeTtsVoice": {
+          "type": "string",
+          "default": "en-US-GuyNeural",
+          "description": "Default edge-tts neural voice pre-selected in Generate Voice Sample (e.g. en-US-GuyNeural, en-US-ChristopherNeural)."
         }
       }
     }

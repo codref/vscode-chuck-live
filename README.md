@@ -90,6 +90,9 @@ Unannotated globals are ignored. The extension generates a temp OSC bridge shred
 | `chuckLive.vmArgs` | `[]` | Extra `--loop` args |
 | `chuckLive.saveBeforeAdd` | `true` | Save editor before add/reload |
 | `chuckLive.initLibraryDir` | `chuck` | Default folder for **Init Project Library** |
+| `chuckLive.edgeTtsExecutable` | `edge-tts` | Binary for **Generate Voice Sample** (absolute path if not on PATH) |
+| `chuckLive.ffmpegExecutable` | `ffmpeg` | Converts TTS → mono 44.1 kHz WAV for `doom-vox.ck` |
+| `chuckLive.edgeTtsVoice` | `en-US-GuyNeural` | Default neural voice pre-selected in the voice picker |
 
 ### Audio (PipeWire / JACK)
 
@@ -115,5 +118,6 @@ bin/chuck-pw --probe
 - **Open Sequencer** — 16-step cascade: A/B banks, swing, probability, mute/solo, **Save As… / Load…** as JSON or `.ck` → `.chuck-live/patterns/`. **Sync ON** = ChucK transport (`live_*` globals).
 - **Init Project Library** — copy bundled modules + seed patterns into `.chuck-live/patterns/`
 - **Import Bundled Patterns** — copy `examples/sequences/*.{json,ck}` without full library init
+- **Generate Voice Sample** — runs `edge-tts --list-voices` for the full catalog (~300+), then edge-tts + ffmpeg → `voices/samples/doom-vox.wav` for `doom-vox.ck`
 - **Re-init Project Library (force)** — replace an existing library and refresh AI guides (full preset wipes the library folder first)
 - **Meter** (ChucK Session) — L/R peak VU bars; auto-loaded with Start VM (with bridge + transport)
