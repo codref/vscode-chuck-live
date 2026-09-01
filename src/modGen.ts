@@ -72,9 +72,8 @@ export function generateModMatrixSource(input: ModCodegenInput): string {
   const indexed = sources.filter((s) => (s.index ?? 0) >= 1);
 
   lines.push('');
-  lines.push('fun void applyRoutes() {');
-  lines.push('  while (true) {');
-  lines.push('    0 => int active;');
+  lines.push('while (true) {');
+  lines.push('  0 => int active;');
 
   for (const t of targets) {
     lines.push(`    if (${t.srcName} != 0) {`);
@@ -91,14 +90,9 @@ export function generateModMatrixSource(input: ModCodegenInput): string {
   }
 
   // Idle longer when nothing is patched — avoids burning a core for an empty matrix.
-  lines.push('    if (active == 0) 250::ms => now;');
-  lines.push('    else 50::ms => now;');
-  lines.push('  }');
+  lines.push('  if (active == 0) 250::ms => now;');
+  lines.push('  else 50::ms => now;');
   lines.push('}');
-  lines.push('');
-  lines.push('spork ~ applyRoutes();');
-  // Parent shred stays alive cheaply (do not also spin at control rate).
-  lines.push('while (true) 1::second => now;');
   lines.push('');
 
   return lines.join('\n');

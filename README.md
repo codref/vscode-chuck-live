@@ -114,7 +114,7 @@ bin/chuck-pw --probe
 - Start / Stop VM (Session **Control**)
 - Add Current File / Reload Shred / Remove Shred / Remove All — inline actions on the Shreds list, CodeLens **Load** / **Reload**, editor title icons
 - Refresh Status / Refresh Knobs
-- **Open Rack** — full-page Eurorack modules for loaded shreds; **sequencer** faceplate with master BPM (`live_bpm`) when VM is running
+- **Open Rack** — full-page Eurorack modules for loaded shreds; **sequencer** faceplate with master BPM (`live_bpm`) when VM is running. Group controls with `// ---- section ----` comments above globals; gate buttons and gain/amp knobs stay pinned at the top of each module.
 - **Open Sequencer** — 16-step cascade: A/B banks, swing, probability, mute/solo, **Save As… / Load…** as JSON or `.ck` → `.chuck-live/patterns/`. **Sync ON** = ChucK transport (`live_*` globals).
 - **Init Project Library** — copy bundled modules + seed patterns into `.chuck-live/patterns/`
 - **Import Bundled Patterns** — copy `examples/sequences/*.{json,ck}` without full library init

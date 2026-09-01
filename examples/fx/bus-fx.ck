@@ -44,11 +44,11 @@ spork ~ _ckLivePeak();
 while (true) 20::ms => now;
 
 fun void _ckLivePeak() {
-  Math.pow(0.001, 1.0 / (0.05 * 44100.0)) => float d;
+  Math.pow(0.001, 1.0 / (0.05 * 40.0)) => float d;
   while (true) {
     Math.fabs(bus_fx_meter.last()) => float s;
     if (s > bus_fx_meter_p) s => bus_fx_meter_p; else bus_fx_meter_p * d => bus_fx_meter_p;
-    1::samp => now;
+    25::ms => now;
   }
 }
 

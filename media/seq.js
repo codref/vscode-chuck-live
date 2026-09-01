@@ -1364,9 +1364,10 @@
     const any = trackOrder.some((n) => patterns[n] && patterns[n].running);
     if (!any) {
       stopMasterTimer();
+      patternPendingHint = false;
       if (useChuckClock()) {
-        dumpTransport({ running: false });
         publishTransport({ running: false });
+        dumpTransport({ running: false });
       }
     } else if (useChuckClock()) {
       dumpTransportSoon();
@@ -2060,9 +2061,10 @@
       stopClock(name);
     }
     stopMasterTimer();
+    patternPendingHint = false;
     if (useChuckClock()) {
-      dumpTransport({ running: false });
       publishTransport({ running: false });
+      dumpTransport({ running: false });
     }
   }
 
@@ -2172,9 +2174,10 @@
         stopClock(name);
       }
       stopMasterTimer();
+      patternPendingHint = false;
       if (useChuckClock()) {
-        dumpTransport({ running: false });
         publishTransport({ running: false });
+        dumpTransport({ running: false });
       }
       for (const name of trackOrder) updatePlayhead(name);
       persist();

@@ -166,7 +166,7 @@ Sequencer auto-adds `@seqGate` tracks (pads only). Run with Sync clocks for a lo
 | `neural-matrix.ck` | `nm_noteHz`, P-locks, `nm_gate` | Dual wavetable/FM bass + fold/crush macros |
 | `modem.ck` | `md_gate`, `md_digit` | DTMF / FSK texture |
 | `doom-vox.ck` | `dv_noteHz`, `dv_accent`, `dv_chop`, `dv_gate` | edge-tts sample: vocoder / pitched / oneshot |
-| `doom-vox-slot.ck` | copy template → unique `xx_gate` | Lite oneshot wrapper (~130 lines); see [`voices/slots/README.md`](voices/slots/README.md) |
+| `doom-vox-slot.ck` | copy template → unique `xx_gate` | Full oneshot slot (same knobs as doom-vox phrase mode); see [`voices/slots/README.md`](voices/slots/README.md) |
 | `slots/doom-cyber.ck` | `cy_gate` | Example slot → `cyber.wav` |
 | `slots/doom-remember.ck` | `rm_gate` | Example slot → `doom-vox.wav` |
 

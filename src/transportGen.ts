@@ -96,6 +96,8 @@ export function generateTransportSource(spec: TransportSpec): string {
     `global float ${LIVE_SEQ.swingPend}[16];`,
     `global int ${LIVE_SEQ.armed};`,
     `global int ${LIVE_SEQ.commit};`,
+    '// Bumped on each OTF reload so orphaned spork children exit.',
+    'global int transportGen;',
     '',
   ];
 
@@ -118,8 +120,8 @@ export function generateTransportSource(spec: TransportSpec): string {
     }
   }
 
-  // Swing worker wake Events (persistent shreds — no per-step spork).
-  for (let i = 0; i < TRANSPORT_MAX_TRACKS; i++) {
+  // Swing worker wake Events (one per active track slot).
+  for (let i = 0; i < n; i++) {
     lines.push(`Event swEv${i};`);
     lines.push(`0 => int swStep${i};`);
     lines.push(`0::ms => dur swDur${i};`);
@@ -127,6 +129,7 @@ export function generateTransportSource(spec: TransportSpec): string {
 
   lines.push(
     '',
+    'transportGen + 1 => transportGen;',
     `${bpm} => ${LIVE_TRANSPORT.bpm};`,
     `${step} => ${LIVE_TRANSPORT.step};`,
     `(60.0 / Math.max(40.0, ${LIVE_TRANSPORT.bpm}) / 4.0) => ${LIVE_TRANSPORT.stepDur};`,
@@ -238,13 +241,15 @@ export function generateTransportSource(spec: TransportSpec): string {
   }
   lines.push('}', '');
 
-  // Persistent swing workers (one per slot).
-  for (let i = 0; i < TRANSPORT_MAX_TRACKS; i++) {
+  // Persistent swing workers (one per active track; exit when transportGen bumps).
+  for (let i = 0; i < n; i++) {
     lines.push(
-      `fun void swingWorker${i}() {`,
-      '  while (true) {',
+      `fun void swingWorker${i}(int gen) {`,
+      '  while (transportGen == gen) {',
       `    swEv${i} => now;`,
+      '    if (transportGen != gen) break;',
       `    swDur${i} => now;`,
+      '    if (transportGen != gen) break;',
       `    if (!${LIVE_TRANSPORT.running}) continue;`,
       `    fireTrack(${i}, swStep${i});`,
       '  }',
@@ -262,7 +267,7 @@ export function generateTransportSource(spec: TransportSpec): string {
     `      ${LIVE_TRANSPORT.stepDur}::second * Math.min(${LIVE_SEQ.swingAmt}[i], 0.85) => dur d;`
   );
 
-  for (let i = 0; i < TRANSPORT_MAX_TRACKS; i++) {
+  for (let i = 0; i < n; i++) {
     lines.push(
       `      if (i == ${i}) {`,
       `        s => swStep${i};`,
@@ -295,34 +300,35 @@ export function generateTransportSource(spec: TransportSpec): string {
     `    0 => ${LIVE_TRANSPORT.cmd};`,
     '  }',
     '}',
-    '',
-    'fun void clockLoop() {',
-    '  while (true) {',
-    '    applyCmd();',
-    '    applySeqFlags();',
-    '    updateDur();',
-    `    if (${LIVE_TRANSPORT.running}) {`,
-    `      fireStep(${LIVE_TRANSPORT.step});`,
-    '      sendPlayhead();',
-    `      ${LIVE_TRANSPORT.stepDur}::second => now;`,
-    `      (${LIVE_TRANSPORT.step} + 1) % 16 => int next;`,
-    `      if (next == 0 && ${LIVE_SEQ.armed} != 0) {`,
-    '        copyPendToLive();',
-    `        0 => ${LIVE_SEQ.armed};`,
-    '      }',
-    `      next => ${LIVE_TRANSPORT.step};`,
-    '    } else {',
-    '      20::ms => now;',
+    ''
+  );
+
+  for (let i = 0; i < n; i++) {
+    lines.push(`spork ~ swingWorker${i}(transportGen);`);
+  }
+
+  lines.push(
+    '// Main shred owns the clock — sporked clockLoop survives OTF replace.',
+    'while (true) {',
+    '  applyCmd();',
+    '  applySeqFlags();',
+    '  updateDur();',
+    `  if (${LIVE_TRANSPORT.running}) {`,
+    `    fireStep(${LIVE_TRANSPORT.step});`,
+    '    sendPlayhead();',
+    `    ${LIVE_TRANSPORT.stepDur}::second => now;`,
+    `    (${LIVE_TRANSPORT.step} + 1) % 16 => int next;`,
+    `    if (next == 0 && ${LIVE_SEQ.armed} != 0) {`,
+    '      copyPendToLive();',
+    `      0 => ${LIVE_SEQ.armed};`,
     '    }',
+    `    next => ${LIVE_TRANSPORT.step};`,
+    '  } else {',
+    '    100::ms => now;',
     '  }',
     '}',
     ''
   );
-
-  for (let i = 0; i < TRANSPORT_MAX_TRACKS; i++) {
-    lines.push(`spork ~ swingWorker${i}();`);
-  }
-  lines.push('spork ~ clockLoop();', 'while (true) 1::second => now;', '');
 
   return lines.join('\n');
 }

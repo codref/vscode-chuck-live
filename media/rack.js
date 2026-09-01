@@ -84,21 +84,37 @@
     const controls = document.createElement('div');
     controls.className = 'controls';
 
-    const knobs = mod.knobs || [];
-    if (!knobs.length) {
+    const groups =
+      mod.groups ||
+      (mod.knobs && mod.knobs.length ? [{ knobs: mod.knobs }] : []);
+    if (!groups.length || !groups.some((g) => g.knobs && g.knobs.length)) {
       const none = document.createElement('div');
       none.className = 'cell-value';
       none.style.opacity = '0.5';
       none.textContent = 'no knobs';
       controls.appendChild(none);
     } else {
-      for (const k of knobs) {
-        if (k.kind === 'button') {
-          controls.appendChild(makeBang(k));
-        } else if ((k.ui || 'dial') === 'slider') {
-          controls.appendChild(makeSlider(k));
-        } else {
-          controls.appendChild(makeDial(k));
+      for (const group of groups) {
+        const knobs = group.knobs || [];
+        if (!knobs.length) continue;
+
+        let host = controls;
+        if (group.pinned) {
+          host = document.createElement('div');
+          host.className = 'controls-main';
+          controls.appendChild(host);
+        } else if (group.label) {
+          controls.appendChild(makeSectionDivider(group.label));
+        }
+
+        for (const k of knobs) {
+          if (k.kind === 'button') {
+            host.appendChild(makeBang(k));
+          } else if ((k.ui || 'dial') === 'slider') {
+            host.appendChild(makeSlider(k));
+          } else {
+            host.appendChild(makeDial(k));
+          }
         }
       }
     }
@@ -322,6 +338,19 @@
       },
       commit,
     };
+  }
+
+  function makeSectionDivider(label) {
+    const el = document.createElement('div');
+    el.className = 'ctrl-section';
+    const head = document.createElement('div');
+    head.className = 'ctrl-section-head';
+    head.textContent = label;
+    const rule = document.createElement('div');
+    rule.className = 'ctrl-section-rule';
+    el.appendChild(head);
+    el.appendChild(rule);
+    return el;
   }
 
   function makeBang(k) {

@@ -41,6 +41,8 @@ export interface Annotation {
   modLabel?: string;
   modUnit?: string;
   modScale?: number;
+  /** Rack section from nearest preceding `// ---- name ----` comment. */
+  section?: string;
 }
 
 /** Modulation source exported by a patch (`@modSource`). */
@@ -96,6 +98,7 @@ const GLOBAL_DECL =
 const ANN_LINE =
   /^\/\/\s*@(slider|knob|button|seq|seqGate|modSource|modTarget)\b(.*)$/;
 const MOD_ROUTE_LINE = /^\/\/\s*@modRoute\b(.*)$/;
+const SECTION_LINE = /^\/\/\s*----\s*(.+?)\s*----\s*$/;
 
 /** Route bus global names for a mod target. */
 export function modBusNames(
@@ -151,8 +154,15 @@ function parseFileAnnotations(
   }
 
   let i = 0;
+  let currentSection: string | undefined;
   while (i < lines.length) {
     const line = lines[i].trim();
+    const sectionM = line.match(SECTION_LINE);
+    if (sectionM) {
+      currentSection = normalizeSection(sectionM[1]);
+      i++;
+      continue;
+    }
     const m0 = line.match(ANN_LINE);
     if (!m0) {
       i++;
@@ -240,6 +250,9 @@ function parseFileAnnotations(
         if (attrs.scale !== undefined) {
           ann.modScale = num(attrs.scale, 1);
         }
+      }
+      if (currentSection) {
+        ann.section = currentSection;
       }
       annotations.push(ann);
     }
@@ -436,6 +449,10 @@ function mergeStack(
     }
   }
   return ann;
+}
+
+function normalizeSection(raw: string): string {
+  return raw.trim().replace(/\s+/g, ' ');
 }
 
 function parseAttrs(rest: string): Record<string, string> {

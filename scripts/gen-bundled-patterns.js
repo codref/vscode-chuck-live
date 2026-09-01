@@ -119,9 +119,9 @@ const doomVoxPatterns = {
 
 // Dual slot voices — independent gates on alternating steps
 const rm_gates = [1,0,0,0, 0,0,1,0, 0,0,0,0, 1,0,0,0];
-const cy_gates = [0,0,1,0, 1,0,0,0, 0,1,0,0, 0,0,1,0];
+const cy_gates = [0,0,1,0, 0,0,0,0, 0,0,0,0, 0,0,0,0];
 const rm_accent = [1,0,0,0, 0,0,0.8,0, 0,0,0,0, 0.9,0,0,0];
-const cy_accent = [0,0,0.7,0, 1,0,0,0, 0,0.6,0,0, 0,0,0.75,0];
+const cy_accent = [0,0,0.7,0, 0,0,0,0, 0,0,0,0, 0,0,0,0];
 
 const doomVoxDualPatterns = {
   rm_gate: gateTrack('rm_gate', rm_gates),

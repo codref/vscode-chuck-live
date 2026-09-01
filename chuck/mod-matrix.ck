@@ -8,4 +8,4 @@
 //   if (mb_pitchMod_src == 0) f * (1.0 + mb_lfoOut * 0.05) => pf;
 //   else f + mb_pitchMod => pf;
 
-while (true) 20::ms => now;
+// Generated mod-matrix runs applyRoutes in the main shred loop (no spork orphans).

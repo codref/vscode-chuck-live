@@ -72,40 +72,26 @@ ${globals}
 
 0.0 => float peakL;
 0.0 => float peakR;
-// Per-sample release (~50 ms at 44.1 kHz)
-Math.pow(0.001, 1.0 / (0.05 * 44100.0)) => float decay;
-
-fun void trackL() {
-  while (true) {
-    Math.fabs(dac.chan(0).last()) => float s;
-    if (s > peakL) {
-      s => peakL;
-    } else {
-      peakL * decay => peakL;
-    }
-    1::samp => now;
-  }
-}
-
-fun void trackR() {
-  while (true) {
-    Math.fabs(dac.chan(1).last()) => float s;
-    if (s > peakR) {
-      s => peakR;
-    } else {
-      peakR * decay => peakR;
-    }
-    1::samp => now;
-  }
-}
-
-spork ~ trackL();
-spork ~ trackR();
+// ~50 ms release at 40 Hz UI rate (25::ms steps) — do not track per-sample.
+Math.pow(0.001, 1.0 / (0.05 * 40.0)) => float decay;
 
 OscOut xmit;
 xmit.dest("${host}", ${meterPort});
 
+// Single shred loop — sporked peak trackers survive OTF replace and burn CPU.
 while (true) {
+  Math.fabs(dac.chan(0).last()) => float sL;
+  if (sL > peakL) {
+    sL => peakL;
+  } else {
+    peakL * decay => peakL;
+  }
+  Math.fabs(dac.chan(1).last()) => float sR;
+  if (sR > peakR) {
+    sR => peakR;
+  } else {
+    peakR * decay => peakR;
+  }
   xmit.start("/chuck/vu");
   xmit.add(peakL);
   xmit.add(peakR);

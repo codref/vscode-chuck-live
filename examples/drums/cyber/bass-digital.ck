@@ -66,6 +66,8 @@ float fLand;
 40.0 => fLand;
 float bitsEff;
 4.0 => bitsEff;
+int voiceLinked;
+0 => voiceLinked;
 
 SinOsc sub => Gain oscMix;
 PulseOsc sqr => oscMix;
@@ -91,19 +93,51 @@ spork ~ onBass();
 spork ~ follow();
 spork ~ crushLoop();
 spork ~ _ckLivePeak();
+1 => voiceLinked;
 while (true) 20::ms => now;
 
+fun int voiceSilent() {
+  return (env.value() < 0.001 && clickEnv.value() < 0.001);
+}
+
+fun void voiceUnlink() {
+  if (voiceLinked) {
+    g =< cy_bass_meter;
+    clickG =< cy_bass_meter;
+    crushIn =< blackhole;
+    0 => voiceLinked;
+  }
+}
+
+fun void voiceLink() {
+  if (!voiceLinked) {
+    crushIn => blackhole;
+    g => cy_bass_meter;
+    clickG => cy_bass_meter;
+    1 => voiceLinked;
+  }
+}
+
 fun void _ckLivePeak() {
-  Math.pow(0.001, 1.0 / (0.05 * 44100.0)) => float d;
+  Math.pow(0.001, 1.0 / (0.05 * 40.0)) => float d;
   while (true) {
     Math.fabs(cy_bass_meter.last()) => float s;
     if (s > cy_bass_meter_p) s => cy_bass_meter_p; else cy_bass_meter_p * d => cy_bass_meter_p;
-    1::samp => now;
+    25::ms => now;
   }
 }
 
 fun void follow() {
   while (true) {
+    if (voiceSilent()) {
+      voiceUnlink();
+      0.0 => crushOut.next;
+      0.0 => g.gain;
+      0.0 => clickG.gain;
+      25::ms => now;
+      continue;
+    }
+    voiceLink();
     env.value() => cy_bass_envOut;
     cy_bass_amp => g.gain;
     1.0 - cy_bass_pulse => sub.gain;
@@ -139,6 +173,11 @@ fun void follow() {
 // Sample-hold + bit quantize — classic lo-bit without a dedicated crush UGen.
 fun void crushLoop() {
   while (true) {
+    if (voiceSilent()) {
+      0.0 => crushOut.next;
+      25::ms => now;
+      continue;
+    }
     Math.max(1.0, Math.min(8.0, bitsEff)) => float bits;
     Math.pow(2.0, bits) => float levels;
     Math.max(1.0, cy_bass_rate) $ int => int hold;
@@ -156,6 +195,7 @@ fun void onBass() {
 }
 
 fun void bassHit() {
+  voiceLink();
   fLand * 3.2 => float f0;
   f0 => sub.freq;
   f0 => sqr.freq;

@@ -120,7 +120,16 @@ export class SeqPanel {
 
   /** True when ChucK transport was last started for a running sequencer pattern. */
   hasRunningTracks(): boolean {
-    return this.lastTransportRunning === true;
+    if (this.lastTransportRunning !== true) {
+      return false;
+    }
+    const dump = this.lastTransportDump;
+    if (!dump?.running) {
+      return false;
+    }
+    const order = dump.trackOrder ?? [];
+    const patterns = dump.patterns ?? {};
+    return order.some((n) => patterns[n]?.running);
   }
 
   /** Update master BPM from rack or host (does not re-notify rack). */
@@ -593,6 +602,13 @@ export class SeqPanel {
         `/chuck/${LIVE_TRANSPORT.running}`,
         msg.running ? 1 : 0
       );
+      if (!msg.running) {
+        this.lastTransportRunning = false;
+        this.queuedTopologyDump = undefined;
+        if (this.lastTransportDump) {
+          this.lastTransportDump = { ...this.lastTransportDump, running: false };
+        }
+      }
     }
     if (msg.swingEnabled !== undefined) {
       this.osc.sendInt(

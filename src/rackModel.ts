@@ -7,15 +7,90 @@ import { resolveChuckPath } from './chuckPaths';
 import { ShredOps, isFileModule } from './shredOps';
 
 /** One Eurorack-style module = one loaded (non-bridge) shred + its annotations. */
+export interface RackControlGroup {
+  /** Section divider text; omitted for pinned primary block. */
+  label?: string;
+  /** Gate / gain block pinned at top of scroll area. */
+  pinned?: boolean;
+  knobs: Annotation[];
+}
+
 export interface RackModule {
   id: number;
   title: string;
   file: string;
   knobs: Annotation[];
+  /** Layout groups for rack faceplate (primary + section dividers). */
+  groups: RackControlGroup[];
   /** Hint UI for master filter module chrome. */
   isMaster?: boolean;
   /** Virtual sequencer / transport faceplate (live_bpm). */
   isTransport?: boolean;
+}
+
+const GAIN_NAME = /(?:^|_)(amp|gain|level|vol)$|^master(_amp)?$/i;
+
+function isPrimaryGain(k: Annotation): boolean {
+  return k.kind === 'knob' && GAIN_NAME.test(k.name);
+}
+
+/** Title-case section labels while preserving slash separators. */
+export function formatSectionLabel(section: string): string {
+  return section
+    .split('/')
+    .map((part) => part.trim())
+    .map((part) => (part ? part.charAt(0).toUpperCase() + part.slice(1) : part))
+    .join(' / ');
+}
+
+/** Primary (gate/gain) block + section groups in source order. */
+export function buildRackControlGroups(knobs: Annotation[]): RackControlGroup[] {
+  const primaryNames = new Set<string>();
+  const primaryKnobs: Annotation[] = [];
+
+  for (const k of knobs) {
+    if (k.kind === 'button') {
+      primaryKnobs.push(k);
+      primaryNames.add(k.name);
+    }
+  }
+  for (const k of knobs) {
+    if (isPrimaryGain(k) && !primaryNames.has(k.name)) {
+      primaryKnobs.push(k);
+      primaryNames.add(k.name);
+    }
+  }
+
+  const rest = knobs.filter((k) => !primaryNames.has(k.name));
+  const hasAnySection = rest.some((k) => !!k.section);
+  const groups: RackControlGroup[] = [];
+
+  if (primaryKnobs.length) {
+    groups.push({ pinned: true, knobs: primaryKnobs });
+  }
+
+  let i = 0;
+  while (i < rest.length) {
+    const section = rest[i].section;
+    const bucket: Annotation[] = [];
+    while (i < rest.length && rest[i].section === section) {
+      bucket.push(rest[i]);
+      i++;
+    }
+    if (!bucket.length) {
+      continue;
+    }
+    groups.push({
+      label: section
+        ? formatSectionLabel(section)
+        : hasAnySection
+          ? 'Controls'
+          : undefined,
+      knobs: bucket,
+    });
+  }
+
+  return groups.length ? groups : [{ knobs }];
 }
 
 /** Wired-only shreds: stay loaded but are not rack faceplates. */
@@ -55,6 +130,7 @@ export function buildModulesFromShreds(shredOps: ShredOps): RackModule[] {
       title,
       file,
       knobs,
+      groups: buildRackControlGroups(knobs),
       isMaster:
         /(?:^|[/\\])master\.ck$/i.test(file) || /^master\.ck$/i.test(title),
     });
@@ -74,23 +150,25 @@ export function buildModulesFromShreds(shredOps: ShredOps): RackModule[] {
 /** Virtual rack module for master tempo (`live_bpm` on the OSC bridge). */
 export function buildTransportRackModule(bpm = 120): RackModule {
   const safe = Math.max(40, Math.min(200, bpm));
+  const knobs: Annotation[] = [
+    {
+      kind: 'knob',
+      name: LIVE_TRANSPORT.bpm,
+      type: 'float',
+      ui: 'dial',
+      min: 40,
+      max: 200,
+      step: 1,
+      default: safe,
+    },
+  ];
   return {
     id: -1,
     title: 'sequencer',
     file: 'chuck-live-transport',
     isTransport: true,
-    knobs: [
-      {
-        kind: 'knob',
-        name: LIVE_TRANSPORT.bpm,
-        type: 'float',
-        ui: 'dial',
-        min: 40,
-        max: 200,
-        step: 1,
-        default: safe,
-      },
-    ],
+    knobs,
+    groups: [{ knobs }],
   };
 }
 

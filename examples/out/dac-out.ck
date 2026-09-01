@@ -25,7 +25,7 @@ while (true) 1::second => now;
 // Rack meter helper (same pattern in every bus module).
 fun void _ckLivePeak() {
   // Exponential decay: ~50 ms fall time at 44.1 kHz (attack is instant).
-  Math.pow(0.001, 1.0 / (0.05 * 44100.0)) => float d;
+  Math.pow(0.001, 1.0 / (0.05 * 40.0)) => float d;
   while (true) {
     Math.fabs(dac_out_meter.last()) => float s;   // abs value of last sample
     if (s > dac_out_meter_p) s => dac_out_meter_p; else dac_out_meter_p * d => dac_out_meter_p;

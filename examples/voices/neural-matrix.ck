@@ -198,6 +198,7 @@ global float nm_bits_mod_depth;
 1.0 => float accGain;
 0 => int envOn;
 0 => int hitGen;
+0 => int voiceLinked;
 -1.0 => float lastGateSec;
 1.0 => float foldDrive;
 0.15 => float foldBias;
@@ -299,14 +300,15 @@ spork ~ crackleLoop();
 spork ~ chaosLoop();
 spork ~ onGate();
 spork ~ _ckLivePeak();
+1 => voiceLinked;
 while (true) 20::ms => now;
 
 fun void _ckLivePeak() {
-  Math.pow(0.001, 1.0 / (0.05 * 44100.0)) => float d;
+  Math.pow(0.001, 1.0 / (0.05 * 40.0)) => float d;
   while (true) {
     Math.fabs(nm_meter.last()) => float s;
     if (s > nm_meter_p) s => nm_meter_p; else nm_meter_p * d => nm_meter_p;
-    1::samp => now;
+    25::ms => now;
   }
 }
 
@@ -320,6 +322,38 @@ fun float triFold(float x) {
   return y * 4.0 - 1.0;
 }
 
+fun int voiceSilent() {
+  return (!envOn && env.value() < 0.001);
+}
+
+fun void sleepMix() {
+  0.0 => sawG.gain;
+  0.0 => pulseG.gain;
+  0.0 => blitG.gain;
+  0.0 => formG.gain;
+  0.0 => haasG.gain;
+  0.0 => subG.gain;
+  0.0 => wG.gain;
+  0.0 => cG.gain;
+  0.0 => hG.gain;
+}
+
+fun void voiceUnlink() {
+  if (voiceLinked) {
+    out =< nm_meter;
+    mix =< blackhole;
+    0 => voiceLinked;
+  }
+}
+
+fun void voiceLink() {
+  if (!voiceLinked) {
+    mix => blackhole;
+    out => nm_meter;
+    1 => voiceLinked;
+  }
+}
+
 fun int snapRatchet(float r) {
   Math.max(1.0, Math.min(8.0, r)) $ int => int n;
   if (n >= 7) return 8;
@@ -329,6 +363,11 @@ fun int snapRatchet(float r) {
 
 fun void crackleLoop() {
   while (true) {
+    if (voiceSilent() && nm_tex < 0.02 && nm_corrupt < 0.02) {
+      0.0 => crackle.next;
+      50::ms => now;
+      continue;
+    }
     Math.random2f(-1.0, 1.0) => crackle.next;
     Math.random2f(6.0, 70.0)::ms => now;
   }
@@ -336,6 +375,11 @@ fun void crackleLoop() {
 
 fun void chaosLoop() {
   while (true) {
+    if (voiceSilent() && nm_mutate < 0.001) {
+      0.0 => nm_chaosOut;
+      100::ms => now;
+      continue;
+    }
     Math.random2f(-1.0, 1.0) => nm_chaosOut;
     (40.0 + Math.random2f(0.0, 220.0) * (1.0 - nm_mutate * 0.6))::ms => now;
   }
@@ -343,6 +387,11 @@ fun void chaosLoop() {
 
 fun void foldLoop() {
   while (true) {
+    if (voiceSilent()) {
+      0.0 => foldOut.next;
+      25::ms => now;
+      continue;
+    }
     mix.last() => float x;
     fmMod.last() => float m;
     x * (1.0 - xmodAmt + xmodAmt * m) => x;
@@ -355,6 +404,11 @@ fun void foldLoop() {
 
 fun void crushLoop() {
   while (true) {
+    if (voiceSilent()) {
+      0.0 => crushOut.next;
+      25::ms => now;
+      continue;
+    }
     Math.max(1.0, Math.min(12.0, bitsEff)) => float bits;
     Math.pow(2.0, bits) => float levels;
     Math.max(1.0, holdEff) $ int => int hold;
@@ -366,6 +420,10 @@ fun void crushLoop() {
 
 fun void fmLoop() {
   while (true) {
+    if (voiceSilent()) {
+      25::ms => now;
+      continue;
+    }
     nm_curHz * octMulNow => float f;
     if (nm_pitchMod_src == 0) {
       f * (1.0 + nm_lfoOut * 0.05) => f;
@@ -393,6 +451,17 @@ fun void fmLoop() {
 
 fun void follow() {
   while (true) {
+    if (voiceSilent()) {
+      voiceUnlink();
+      sleepMix();
+      0.0 => out.gain;
+      0.0 => foldOut.next;
+      0.0 => crushOut.next;
+      env.value() => nm_envOut;
+      25::ms => now;
+      continue;
+    }
+    voiceLink();
     nm_morph => float m;
     Math.max(0.0, 1.0 - m * 0.85) => float sawAmt;
     0.0 => float pulseAmt;
@@ -566,6 +635,7 @@ fun void slideRelease(int gen) {
 }
 
 fun void hit() {
+  voiceLink();
   hitGen + 1 => hitGen;
   hitGen => int myGen;
 

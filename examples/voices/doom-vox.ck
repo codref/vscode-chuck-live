@@ -24,11 +24,17 @@ global float dv_noteHz;
 global float dv_accent;
 // @seq mode=raw min=0 max=1 step=0.01 default=0 gate=dv_gate
 global float dv_chop;
+// @knob min=0.05 max=1 step=0.01 default=0.45
+global float dv_chopEnd;
 // @seqGate
 global Event dv_gate;
 
 global float live_stepDur;
 0.125 => live_stepDur;
+
+global int live_step;
+
+global int live_running;
 
 // ---- mode / sample ----
 // WAV bank — add a filename after each Generate Voice Sample (same folder).
@@ -100,6 +106,7 @@ global float dv_rel;
 82.41 => dv_noteHz;
 0.55 => dv_accent;
 0.0 => dv_chop;
+0.45 => dv_chopEnd;
 
 int sampleOk;
 0 => sampleOk;
@@ -126,7 +133,7 @@ fun int loadSampleIdx(int idx) {
     1 => sampleOk;
     0 => buf.pos;
     0 => buf.loop;
-    1.0 => buf.rate;
+    0.0 => buf.rate;
     <<< "doom-vox: loaded", samplePath, "frames", buf.samples() >>>;
     return 1;
   }
@@ -154,13 +161,13 @@ Gain vocG => fxIn;
 Gain sampG => fxIn;
 Gain synG => fxIn;
 
-// sample → pitched / oneshot path
-buf => sampG;
+// sample → pitched / oneshot path (+ vocoder modulator)
+buf => Gain srcMute;
+srcMute => sampG;
+srcMute => FFT fftMod => blackhole;
+0.0 => srcMute.gain;
 // carriers → parallel synth
 carMix => synG;
-
-// ---- FFT vocoder (xsynth-style) ----
-buf => FFT fftMod => blackhole;
 carMix => FFT fftCar => blackhole;
 IFFT ifft => vocG;
 
@@ -189,13 +196,23 @@ fxIn => HPF hp => Gain fold => BPF form => LPF lpf1 => LPF lpf2 => Gain crushIn 
 4.5 => lpf2.Q;
 
 Step crushOut;
-crushOut => ADSR env => Gain out => dv_meter => rackBus;
+Gain lev;
+crushOut => lev => ADSR env => Gain out => dv_meter => rackBus;
 env.set(12::ms, 520::ms, 0.45, 700::ms);
-0.0 => out.gain;
+1.0 => out.gain;
+0.0 => lev.gain;
 0.0 => crushOut.next;
 
 int gated;
 0 => gated;
+int playing;
+int pending;
+int abortNow;
+int voiceLinked;
+0 => playing;
+0 => pending;
+0 => abortNow;
+0 => voiceLinked;
 float playRate;
 1.0 => playRate;
 
@@ -203,15 +220,46 @@ spork ~ follow();
 spork ~ crushLoop();
 spork ~ vocoderLoop();
 spork ~ onGate();
+spork ~ transportWatch();
+spork ~ barWatch();
 spork ~ _ckLivePeak();
+1 => voiceLinked;
 while (true) 20::ms => now;
 
+fun int voiceSilent() {
+  return (!gated && !playing && env.value() < 0.001);
+}
+
+fun void voiceUnlink() {
+  if (voiceLinked) {
+    out =< dv_meter;
+    fxIn =< blackhole;
+    carMix =< synG;
+    carMix =< fftCar;
+    srcMute =< fftMod;
+    buf =< srcMute;
+    0 => voiceLinked;
+  }
+}
+
+fun void voiceLink() {
+  if (!voiceLinked) {
+    buf => srcMute;
+    srcMute => fftMod => blackhole;
+    carMix => synG;
+    carMix => fftCar => blackhole;
+    fxIn => blackhole;
+    out => dv_meter;
+    1 => voiceLinked;
+  }
+}
+
 fun void _ckLivePeak() {
-  Math.pow(0.001, 1.0 / (0.05 * 44100.0)) => float d;
+  Math.pow(0.001, 1.0 / (0.05 * 40.0)) => float d;
   while (true) {
     Math.fabs(dv_meter.last()) => float s;
     if (s > dv_meter_p) s => dv_meter_p; else dv_meter_p * d => dv_meter_p;
-    1::samp => now;
+    25::ms => now;
   }
 }
 
@@ -221,6 +269,11 @@ fun void crushLoop() {
   float held;
   0.0 => held;
   while (true) {
+    if (voiceSilent()) {
+      0.0 => crushOut.next;
+      25::ms => now;
+      continue;
+    }
     crushIn.last() => float x;
     1.0 + dv_drive * (0.5 + dv_accent * 0.5) * 6.0 => float driveAmt;
     x * driveAmt => x;
@@ -244,6 +297,10 @@ fun void crushLoop() {
 
 fun void vocoderLoop() {
   while (true) {
+    if (voiceSilent()) {
+      25::ms => now;
+      continue;
+    }
     if (sampleOk && Std.ftoi(dv_mode) == 0) {
       fftMod.upchuck();
       fftCar.upchuck();
@@ -265,12 +322,12 @@ fun void setCarriers(float hz) {
 
 fun void applyModeGains() {
   Std.ftoi(dv_mode) => int m;
-  dv_amp * (0.65 + 0.35 * dv_accent) => float lev;
-  lev => out.gain;
+  dv_amp * (0.65 + 0.35 * dv_accent) => float levAmt;
+  levAmt => lev.gain;
 
   if (m == 0) {
     // vocoder wet + a little carrier bleed
-    0.85 * lev / Math.max(0.05, dv_amp) => vocG.gain;
+    0.85 * levAmt / Math.max(0.05, dv_amp) => vocG.gain;
     0.0 => sampG.gain;
     dv_synth * 0.12 => synG.gain;
   } else if (m == 1) {
@@ -284,8 +341,29 @@ fun void applyModeGains() {
   }
 }
 
+fun void silence() {
+  0.0 => srcMute.gain;
+  0.0 => buf.rate;
+  env.keyOff();
+  0.0 => lev.gain;
+  0 => gated;
+  0.0 => vocG.gain;
+  0.0 => sampG.gain;
+  0.0 => synG.gain;
+  0 => buf.pos;
+  0.0 => crushOut.next;
+  voiceUnlink();
+}
+
 fun void follow() {
   while (true) {
+    if (voiceSilent()) {
+      voiceUnlink();
+      0.0 => crushOut.next;
+      25::ms => now;
+      continue;
+    }
+    voiceLink();
     Std.ftoi(dv_sample) => int si;
     if (si != lastSampleIdx) {
       loadSampleIdx(si);
@@ -314,10 +392,7 @@ fun void follow() {
     (1.0 - dv_synth * 0.35) * 0.55 => saw.gain;
     dv_synth * 0.4 => pulse.gain;
 
-    // amp always on — ADSR shapes the hit (including release)
-    dv_amp * (0.65 + 0.35 * dv_accent) => out.gain;
-
-    if (sampleOk) {
+    if (sampleOk && (playing || gated)) {
       if (m == 1) {
         Math.max(20.0, dv_root) => float root;
         (hz / root) => playRate;
@@ -328,12 +403,14 @@ fun void follow() {
         1.0 => buf.rate;
         Std.ftoi(dv_loop) => buf.loop;
       } else {
-        // oneshot: near-natural rate, slight pitch from note vs root
         Math.max(20.0, dv_root) => float root;
         Math.pow(hz / root, 0.35) => playRate;
         playRate => buf.rate;
         0 => buf.loop;
       }
+    } else {
+      0.0 => buf.rate;
+      0.0 => srcMute.gain;
     }
 
     if (gated) {
@@ -344,62 +421,145 @@ fun void follow() {
   }
 }
 
+fun void waitAbortable(dur remain) {
+  while (remain > 10::ms) {
+    if (abortNow) {
+      return;
+    }
+    10::ms => now;
+    remain - 10::ms => remain;
+  }
+  if (!abortNow && remain > 0::samp) {
+    remain => now;
+  }
+}
+
+fun void transportWatch() {
+  int lastRun;
+  0 => lastRun;
+  while (true) {
+    live_running => int r;
+    if (lastRun == 1 && r == 0) {
+      1 => abortNow;
+      0 => pending;
+      silence();
+      0 => playing;
+    }
+    r => lastRun;
+    10::ms => now;
+  }
+}
+
+fun void barWatch() {
+  int lastStep;
+  -1 => lastStep;
+  while (true) {
+    live_step => int s;
+    if (lastStep == 15 && s == 0) {
+      0 => pending;
+    }
+    s => lastStep;
+    10::ms => now;
+  }
+}
+
 fun void onGate() {
+  float lastTrig;
+  -1.0 => lastTrig;
   while (true) {
     dv_gate => now;
-    spork ~ hit();
+    now / second => float t;
+    if (lastTrig >= 0.0 && (t - lastTrig) < 0.008) {
+      continue;
+    }
+    t => lastTrig;
+    if (playing) {
+      1 => pending;
+    } else {
+      1 => playing;
+      spork ~ hit();
+    }
   }
 }
 
 fun void hit() {
   if (!sampleOk) {
+    0 => playing;
     return;
   }
-  Std.ftoi(dv_mode) => int m;
-  Math.max(0.0, Math.min(1.0, dv_chop)) => float chop;
-  Std.ftoi(chop * (buf.samples() - 1)) => int startPos;
-  startPos => buf.pos;
-
-  // rate for this hit (same rules as follow)
-  float rateNow;
-  1.0 => rateNow;
-  if (m == 1) {
-    Math.max(20.0, dv_root) => float root;
-    dv_noteHz / root => rateNow;
-  } else if (m == 2) {
-    Math.max(20.0, dv_root) => float root;
-    Math.pow(dv_noteHz / root, 0.35) => rateNow;
-  }
-  Math.max(0.05, Math.fabs(rateNow)) => rateNow;
-  rateNow => buf.rate;
-  rateNow => playRate;
-
-  1 => gated;
-  applyModeGains();
-  env.keyOn();
-
-  // Oneshot / non-looped pitched: hold until the WAV finishes (phrase length),
-  // not just the short ADSR body — otherwise TTS sentences get truncated.
-  if (m == 2 || (m == 1 && Std.ftoi(dv_loop) == 0)) {
-    ((buf.samples() - startPos) $ float) / rateNow => float sampRemain;
-    sampRemain::samp => dur untilEnd;
-    (dv_atk + dv_dec)::ms => dur envFloor;
-    if (untilEnd > envFloor) {
-      untilEnd => now;
-    } else {
-      envFloor => now;
+  voiceLink();
+  0 => abortNow;
+  while (true) {
+    if (abortNow) {
+      break;
     }
-  } else {
-    Math.max(live_stepDur * 0.85, (dv_atk + dv_dec) * 0.001)::second => now;
-  }
+    Std.ftoi(dv_mode) => int m;
+    buf.samples() => int total;
+    Math.max(0.0, Math.min(1.0, dv_chop)) => float startF;
+    Math.max(0.05, Math.min(1.0, dv_chopEnd)) => float endF;
+    if (endF <= startF) {
+      Math.min(1.0, startF + 0.05) => endF;
+    }
+    Std.ftoi(startF * (total - 1)) => int startPos;
+    Std.ftoi(endF * (total - 1)) => int stopPos;
+    if (stopPos <= startPos) {
+      startPos + 1 => stopPos;
+    }
+    startPos => buf.pos;
 
-  env.keyOff();
-  dv_rel::ms => now;
-  0 => gated;
-  0.0 => vocG.gain;
-  0.0 => sampG.gain;
-  0.0 => synG.gain;
-  if (m != 0 || Std.ftoi(dv_loop) == 0) {
-    0 => buf.pos;
+    float rateNow;
+    1.0 => rateNow;
+    if (m == 1) {
+      Math.max(20.0, dv_root) => float root;
+      dv_noteHz / root => rateNow;
+    } else if (m == 2) {
+      Math.max(20.0, dv_root) => float root;
+      Math.pow(dv_noteHz / root, 0.35) => rateNow;
+    }
+    Math.max(0.05, Math.fabs(rateNow)) => rateNow;
+    rateNow => buf.rate;
+    rateNow => playRate;
+
+    1.0 => srcMute.gain;
+    1 => gated;
+    applyModeGains();
+    env.keyOn();
+
+    if (m == 2 || (m == 1 && Std.ftoi(dv_loop) == 0)) {
+      if (total > 1 && stopPos > startPos) {
+        ((stopPos - startPos) $ float) / Math.max(0.05, Math.fabs(rateNow)) => float frames;
+        frames::samp => dur playLen;
+        waitAbortable(playLen);
+        0.0 => buf.rate;
+        0 => buf.pos;
+        0.0 => srcMute.gain;
+      } else {
+        waitAbortable((dv_atk + dv_dec)::ms);
+      }
+    } else {
+      Math.max(live_stepDur * 0.85, (dv_atk + dv_dec) * 0.001)::second => dur hold;
+      waitAbortable(hold);
+    }
+
+    env.keyOff();
+    if (!abortNow) {
+      dv_rel::ms => now;
+    }
+    0 => gated;
+    0.0 => vocG.gain;
+    0.0 => sampG.gain;
+    0.0 => synG.gain;
+    0.0 => lev.gain;
+
+    if (abortNow) {
+      break;
+    }
+    if (pending < 1) {
+      break;
+    }
+    pending--;
   }
+  silence();
+  0 => playing;
+  0 => abortNow;
 }
