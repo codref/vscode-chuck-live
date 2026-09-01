@@ -1,0 +1,19 @@
+---
+description: CPU optimization policy for ChucK Live .ck patches and TypeScript generators
+globs: "**/*.{ck,ts}"
+alwaysApply: false
+---
+
+# CPU policy — ChucK Live
+
+When editing `examples/**/*.ck`, `chuck/**`, or `src/*Gen.ts`, follow `AGENTS.md` § CPU policy.
+
+**Quick rules:**
+
+- Peak meters: **25 ms**, not `1::samp`.
+- OTF-managed shreds: **no orphan sporks** (main-loop clock; `transportGen` exit for workers).
+- Voices: **voiceUnlink** when silent; manual loops sleep at 25 ms when not sounding.
+- Sequencer gates: **one hitWorker**, legato retriggers, coalesce same-step bangs.
+- Follow loops: 5–25 ms, not sample rate unless required for audio math.
+
+Reference implementation: `examples/voices/neural-matrix.ck`.

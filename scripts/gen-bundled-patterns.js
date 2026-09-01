@@ -78,6 +78,13 @@ const nm_plockCrush = [0.2,0.1,0.2,0.6, 0.1,0.3,0.2,0, 0.4,0.1,0.2,0.1, 0.7,0.2,
 const nm_slide = [0,1,0,0, 0,1,0,0, 0,1,1,0, 0,0,0,0];
 const nm_ratchet = [1,1,1,4, 1,1,1,1, 1,1,1,1, 8,1,2,1];
 
+const ps_gates = [1,0,1,0, 1,0,0,1, 1,0,1,0, 1,0,1,1];
+const ps_notes = [40,40,40,28, 40,43,40,36, 40,40,43,40, 47,40,36,28];
+const ps_accent_v = [1,0,0.8,1, 0,0,0.7,1, 1,0,0.6,0, 1,0,0.9,1];
+const ps_plockPit = [0.9,0,0.5,1, 0,0,0.8,0.7, 0.4,0,0.6,0, 1,0,0.85,1];
+const ps_plockCut = [0.2,0,0.35,0.7, 0.15,0,0,0.5, 0.3,0,0.45,0, 0.8,0,0.6,0.9];
+const ps_slide = [0,0,1,0, 0,0,0,0, 0,1,0,0, 0,0,1,0];
+
 const darkwavePatterns = {
   cy_kick: gateTrack('cy_kick', cy_kick_g),
   cy_hat: gateTrack('cy_hat', cy_hat_g),
@@ -103,6 +110,14 @@ const neuralPatterns = {
   nm_plockCrush: floatTrack('nm_plockCrush', nm_plockCrush, nm_gates, 'nm_gate', 'raw'),
   nm_slide: floatTrack('nm_slide', nm_slide, nm_gates, 'nm_gate', 'raw'),
   nm_ratchet: floatTrack('nm_ratchet', nm_ratchet, nm_gates, 'nm_gate', 'raw'),
+};
+
+const pureSubPatterns = {
+  ps_noteHz: floatTrack('ps_noteHz', ps_notes, ps_gates, 'ps_gate', 'midi'),
+  ps_accent: floatTrack('ps_accent', ps_accent_v, ps_gates, 'ps_gate', 'raw'),
+  ps_plockPit: floatTrack('ps_plockPit', ps_plockPit, ps_gates, 'ps_gate', 'raw'),
+  ps_plockCut: floatTrack('ps_plockCut', ps_plockCut, ps_gates, 'ps_gate', 'raw'),
+  ps_slide: floatTrack('ps_slide', ps_slide, ps_gates, 'ps_gate', 'raw'),
 };
 
 // Sparse doom vocal — low density, phrygian roots, chop automation
@@ -262,6 +277,7 @@ const presets = [
   { name: 'modem-pulse', trackOrder: Object.keys(modemPatterns), patterns: modemPatterns },
   { name: 'cyberpunk-full', trackOrder: Object.keys(fullPatterns), patterns: fullPatterns },
   { name: 'neural-matrix', trackOrder: Object.keys(neuralPatterns), patterns: neuralPatterns },
+  { name: 'pure-sub', trackOrder: Object.keys(pureSubPatterns), patterns: pureSubPatterns },
   { name: 'doom-vox', trackOrder: Object.keys(doomVoxPatterns), patterns: doomVoxPatterns },
   { name: 'doom-vox-dual', trackOrder: Object.keys(doomVoxDualPatterns), patterns: doomVoxDualPatterns },
 ];

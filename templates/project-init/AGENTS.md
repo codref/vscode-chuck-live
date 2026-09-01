@@ -70,6 +70,15 @@ Extension generates a temp **OSC bridge** shred mapping `/chuck/<name>` → thos
 - Prefer modest amplitudes on stacked modules (`master_amp`, per-voice amps).
 - Recording: `out/record-out.ck` is tap-only (`mainBus → WvOut`); keep dac-out/fx loaded. Edit `OUT_PATH`, toggle `rec_toggle` from Knobs with that file focused. Safe to unload mid-session.
 
+## CPU (required)
+
+Follow the **CPU policy** in this repo’s `AGENTS.md` when writing or editing `.ck` files:
+
+- `_ckLivePeak` at **25 ms** (~40 Hz), not per-sample.
+- `spork ~ follow()` at **5–25 ms**; disconnect idle voices from `rackBus` pulls.
+- Sequencer voices: one **hitWorker**, **legato** retriggers, gate coalescing.
+- See `examples/voices/neural-matrix.ck` for the reference pattern.
+
 ## Settings (workspace)
 
 - `chuckLive.otfPort` — VM OTF (default 8888)

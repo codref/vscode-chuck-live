@@ -69,7 +69,7 @@ fun void onKick() {
 }
 ```
 
-**Bus modules** — declare `global Gain rackBus;` (from `master.ck`), route `… => rackBus`, add `_ckLivePeak()` for Rack meters. See [`oscillators/sine.ck`](oscillators/sine.ck).
+**Bus modules** — declare `global Gain rackBus;` (from `master.ck`), route `… => rackBus`, add `_ckLivePeak()` for Rack meters (25 ms control rate — see root `AGENTS.md` CPU policy). See [`oscillators/sine.ck`](oscillators/sine.ck).
 
 **Transport** — when Sequencer Sync is on, read `live_stepDur` / `live_tick` for grid-locked timing ([`minibrute/voice.ck`](minibrute/voice.ck)).
 
@@ -164,6 +164,7 @@ Sequencer auto-adds `@seqGate` tracks (pads only). Run with Sync clocks for a lo
 | `tnt-riff.ck` | `tnt_noteHz`, `tnt_gate` | Power-chord stabs |
 | `acid-bass.ck` | `ab_noteHz`, `ab_accent`, `ab_gate` | 303-style monobass |
 | `neural-matrix.ck` | `nm_noteHz`, P-locks, `nm_gate` | Dual wavetable/FM bass + fold/crush macros |
+| `pure-sub.ck` | `ps_noteHz`, pitch-env P-lock, `ps_gate` | Layered sub/harm/texture + Sub Regen; P1: Reese/Pressure, corroder, ring mod |
 | `modem.ck` | `md_gate`, `md_digit` | DTMF / FSK texture |
 | `doom-vox.ck` | `dv_noteHz`, `dv_accent`, `dv_chop`, `dv_gate` | edge-tts sample: vocoder / pitched / oneshot |
 | `doom-vox-slot.ck` | copy template → unique `xx_gate` | Full oneshot slot (same knobs as doom-vox phrase mode); see [`voices/slots/README.md`](voices/slots/README.md) |

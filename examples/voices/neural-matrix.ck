@@ -6,6 +6,7 @@
 //   nm_noteHz / nm_accent / P-locks / nm_slide / nm_ratchet — all share gate=nm_gate
 //   (same step pads bang the voice once; onGate debounces multi-lane broadcasts)
 //   nm_gate — trigger
+// CPU: idle sleep + voiceUnlink when silent; legato retriggers skip blocking waits.
 //
 // Macros: Volt (drive), Chrome (FM/comb/detune), Corrupt (bits/noise/HPF),
 //         Neon (cutoff/chorus/reverb), Mutate (per-step chaos)
@@ -34,6 +35,7 @@ global float nm_slide;
 global float nm_ratchet;
 // @seqGate
 global Event nm_gate;
+Event hitGo;
 
 global float live_stepDur;
 0.125 => live_stepDur;
@@ -299,6 +301,7 @@ spork ~ crushLoop();
 spork ~ crackleLoop();
 spork ~ chaosLoop();
 spork ~ onGate();
+spork ~ hitWorker();
 spork ~ _ckLivePeak();
 1 => voiceLinked;
 while (true) 20::ms => now;
@@ -324,6 +327,10 @@ fun float triFold(float x) {
 
 fun int voiceSilent() {
   return (!envOn && env.value() < 0.001);
+}
+
+fun int voiceSustaining() {
+  return (env.value() > 0.015);
 }
 
 fun void sleepMix() {
@@ -602,7 +609,11 @@ fun void follow() {
     env.set(a, d, nm_sus, r);
 
     nm_amp * accGain => out.gain;
-    5::ms => now;
+    if (voiceSustaining()) {
+      10::ms => now;
+    } else {
+      5::ms => now;
+    }
   }
 }
 
@@ -615,36 +626,25 @@ fun void onGate() {
       continue;
     }
     t => lastGateSec;
+    hitGo.broadcast();
+  }
+}
+
+fun void hitWorker() {
+  while (true) {
+    hitGo => now;
     // Let sibling float writes in this step finish before capturing.
-    spork ~ settledHit();
+    0.75::ms => now;
+    hit();
   }
 }
 
-fun void settledHit() {
-  0.75::ms => now;
-  hit();
-}
-
-fun void slideRelease(int gen) {
-  Math.max(0.01, live_stepDur) * 1.2 => float w;
-  w::second => now;
-  if (gen == hitGen && envOn) {
-    env.keyOff();
-    0 => envOn;
-  }
-}
-
-fun void hit() {
-  voiceLink();
-  hitGen + 1 => hitGen;
-  hitGen => int myGen;
-
+fun void readHitGlobals() {
   nm_accent => float acc;
   nm_plockCut => float pCut;
   nm_plockFold => float pFold;
   nm_plockCrush => float pCrush;
   nm_slide => float sl;
-  nm_ratchet => float rat;
   nm_mutate => float mut;
 
   1.0 => float oct;
@@ -669,9 +669,39 @@ fun void hit() {
   oct => octMulNow;
   Math.max(0.15, acc) => float aMul;
   0.55 + aMul * 0.65 => accGain;
+}
 
-  snapRatchet(rat) => int n;
+fun void slideRelease(int gen) {
+  Math.max(0.01, live_stepDur) * 1.2 => float w;
+  w::second => now;
+  if (gen == hitGen && envOn) {
+    env.keyOff();
+    0 => envOn;
+  }
+}
+
+fun void hitReleaseWait(int gen, float hold) {
+  hold::second => now;
+  if (gen == hitGen && envOn) {
+    env.keyOff();
+    0 => envOn;
+  }
+}
+
+fun void hit() {
+  readHitGlobals();
+  voiceLink();
+
+  snapRatchet(nm_ratchet) => int n;
   Math.max(0.01, live_stepDur) => float stepSec;
+
+  // Legato: note still held (envOn) — refresh P-locks only, keep release spork alive.
+  if (n <= 1 && slideNow <= 0.5 && envOn) {
+    return;
+  }
+
+  hitGen + 1 => hitGen;
+  hitGen => int myGen;
 
   if (n > 1) {
     1 => envOn;
@@ -684,19 +714,14 @@ fun void hit() {
     }
     0 => envOn;
   } else {
-    if (!(sl > 0.5 && envOn)) {
+    if (!(slideNow > 0.5 && envOn)) {
       env.keyOn();
       1 => envOn;
     }
-    if (sl > 0.5) {
-      (stepSec * 0.98)::second => now;
+    if (slideNow > 0.5) {
       spork ~ slideRelease(myGen);
     } else {
-      (stepSec * 0.92)::second => now;
-      if (myGen == hitGen) {
-        env.keyOff();
-        0 => envOn;
-      }
+      spork ~ hitReleaseWait(myGen, stepSec * 0.92);
     }
   }
 

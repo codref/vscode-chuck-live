@@ -36,6 +36,10 @@ Place `// @knob`, `// @slider`, `// @button`, `// @seq`, or `// @seqGate` on the
 
 Use `spork ~ follow()` to mirror OSC globals into UGen params. Use **Reload** (`Ctrl+.`) or the Shreds inline sync icon to hot-swap shreds. Keep global names unique across the session.
 
+## CPU
+
+When adding voices/drums with gates or envelopes, follow `AGENTS.md` CPU policy in the extension repo (or project copy): idle `voiceUnlink`, 25 ms peak meters, one hit worker for gates, legato retriggers. Reference: `examples/voices/neural-matrix.ck`.
+
 ## Standalone
 
 `standalone/*.ck` uses direct `=> dac` and does not use `rackBus`.
