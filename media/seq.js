@@ -40,6 +40,22 @@
   /** @type {Record<string, any>} */
   const swingTimers = {};
 
+  // --- Keyboard drawer state ---
+  let keyboardTrack = null;
+  let keyboardOctave = 3;
+  let recArmed = false;
+  let stepInputMode = false;
+  let selectedStep = 0;
+  let heldPadIndex = -1;
+  let lastRecordStep = -1;
+  let drawerSuggestStyle = 'walk';
+  /** @type {Array<{midi:number,label:string}>} */
+  let keyboardPads = [];
+  let drawerBuiltFor = null;
+  let suppressPadUntil = 0;
+
+  const keyboardDrawerEl = document.getElementById('keyboardDrawer');
+
   const tracksEl = document.getElementById('tracks');
   const addSel = document.getElementById('addTarget');
   const btnAdd = document.getElementById('btnAdd');
@@ -653,6 +669,100 @@
     }
   }
 
+  function noteIndexInScale(notes, midi) {
+    let bestIdx = 0;
+    let bestD = Math.abs(midi - notes[0]);
+    for (let j = 1; j < notes.length; j++) {
+      const d = Math.abs(midi - notes[j]);
+      if (d < bestD) {
+        bestD = d;
+        bestIdx = j;
+      }
+    }
+    return bestIdx;
+  }
+
+  function suggestBank(bank, p, style) {
+    if (p.kind === 'gate' || p.mode !== 'midi') return;
+    const mm = laneMinMax(p);
+    const notes = scaleNotesInRange(mm.min, mm.max);
+    if (!notes.length) return;
+
+    const mid = (mm.min + mm.max) / 2;
+    let rootIdx = noteIndexInScale(notes, mid);
+
+    for (let i = 0; i < 16; i++) {
+      bank.gates[i] = 0;
+      bank.probs[i] = 0;
+      bank.values[i] = notes[rootIdx];
+    }
+
+    if (style === 'bass') {
+      const fifthIdx = Math.min(notes.length - 1, rootIdx + Math.floor(notes.length / 2));
+      const bassSteps = [0, 4, 8, 12, 7];
+      for (let k = 0; k < bassSteps.length; k++) {
+        const i = bassSteps[k];
+        bank.gates[i] = 1;
+        bank.probs[i] = 1;
+        bank.values[i] = k % 2 === 0 ? notes[rootIdx] : notes[fifthIdx];
+      }
+      return;
+    }
+
+    if (style === 'arp') {
+      for (let i = 0; i < 16; i++) {
+        const deg = i % 4;
+        bank.gates[i] = 1;
+        bank.probs[i] = 1;
+        bank.values[i] = notes[Math.min(notes.length - 1, rootIdx + deg)];
+      }
+      return;
+    }
+
+    if (style === 'motif') {
+      let idx = rootIdx;
+      const motif = [];
+      for (let m = 0; m < 4; m++) {
+        motif.push(notes[idx]);
+        const step = Math.random() < 0.7 ? 0 : Math.random() < 0.5 ? -1 : 1;
+        idx = Math.max(0, Math.min(notes.length - 1, idx + step));
+      }
+      for (let i = 0; i < 16; i++) {
+        const mi = i % 4;
+        let ni = noteIndexInScale(notes, motif[mi]);
+        if (i >= 4 && Math.random() < 0.35) {
+          ni = Math.max(0, Math.min(notes.length - 1, ni + (Math.random() < 0.5 ? -1 : 1)));
+        }
+        bank.gates[i] = i % 4 !== 3 || Math.random() < 0.6 ? 1 : 0;
+        bank.probs[i] = bank.gates[i] ? 1 : 0;
+        bank.values[i] = notes[ni];
+      }
+      return;
+    }
+
+    // walk (default)
+    let idx = rootIdx;
+    for (let i = 0; i < 16; i++) {
+      if (Math.random() < 0.3) {
+        bank.gates[i] = 0;
+        bank.probs[i] = 0;
+        bank.values[i] = notes[idx];
+        continue;
+      }
+      bank.gates[i] = 1;
+      bank.probs[i] = 1;
+      bank.values[i] = notes[idx];
+      if (Math.random() < 0.7) {
+        const step = Math.random() < 0.5 ? 0 : Math.random() < 0.5 ? -1 : 1;
+        idx = Math.max(0, Math.min(notes.length - 1, idx + step));
+      }
+    }
+  }
+
+  function applySuggestToTrack(name, style) {
+    applyEditBankTransform(name, (bank, pat) => suggestBank(bank, pat, style || 'walk'));
+  }
+
   function evolveBank(bank, p) {
     const i = Math.floor(Math.random() * 16);
     if (Math.random() < 0.5) {
@@ -1007,6 +1117,28 @@
         applyEditBankTransform(name, evolveBank)
       )
     );
+    const suggestSel = document.createElement('select');
+    suggestSel.className = 'groove-preset';
+    suggestSel.title = 'Harmonic suggest style';
+    for (const [val, lab] of [
+      ['walk', 'Walk'],
+      ['bass', 'Bass'],
+      ['arp', 'Arp'],
+      ['motif', 'Motif'],
+    ]) {
+      const o = document.createElement('option');
+      o.value = val;
+      o.textContent = lab;
+      suggestSel.appendChild(o);
+    }
+    gen.btns.appendChild(suggestSel);
+    gen.btns.appendChild(
+      makeTransformBtn('Suggest', 'Seed harmonic melody', () =>
+        applyEditBankTransform(name, (bank, pat) =>
+          suggestBank(bank, pat, suggestSel.value || 'walk')
+        )
+      )
+    );
     const presetSel = document.createElement('select');
     presetSel.className = 'groove-preset';
     presetSel.title = 'Apply groove preset to gates';
@@ -1201,6 +1333,11 @@
     stopClock(name);
     if (patterns[name]) patterns[name].running = false;
     trackOrder = trackOrder.filter((n) => n !== name);
+    if (keyboardTrack === name) {
+      keyboardTrack = null;
+      recArmed = false;
+      heldPadIndex = -1;
+    }
     maybeStopMaster();
     persist();
     dumpTransportSoon();
@@ -1417,6 +1554,7 @@
       const prev = sharedPlayhead;
       sharedPlayhead = (sharedPlayhead + 1) % 16;
       const wrapped = prev === 15 && sharedPlayhead === 0;
+      captureRecordAtStep(sharedPlayhead);
       for (const name of trackOrder) {
         const p = patterns[name];
         if (!p || !p.running) continue;
@@ -1521,6 +1659,7 @@
       el.classList.toggle('playhead', showPh && idx === ph);
     });
     refreshBankChrome(name);
+    if (keyboardTrack === name) updateChaseRow();
   }
 
   function gateTitle(p, i) {
@@ -1605,7 +1744,7 @@
     return el;
   }
 
-  function makeStep(i, p) {
+  function makeStep(i, p, trackName) {
     if (p.kind === 'gate') return makeGateStep(i, p);
 
     const el = document.createElement('div');
@@ -1672,6 +1811,20 @@
     el.appendChild(pitch);
     el.appendChild(label);
     el.appendChild(gate);
+
+    el.addEventListener('click', (e) => {
+      if (keyboardTrack !== trackName || !stepInputMode) return;
+      if (e.target.closest('.gate') || e.target.closest('.pitch')) return;
+      selectedStep = i;
+      updateStepSelection();
+    });
+    if (keyboardTrack === trackName && stepInputMode && i === selectedStep) {
+      el.classList.add('step-input-selected');
+    }
+    if (keyboardTrack === trackName && anyTrackRunning() && i === sharedPlayhead) {
+      el.classList.add('keyboard-chase');
+    }
+
     return el;
   }
 
@@ -1686,7 +1839,8 @@
       (p.running ? ' running' : '') +
       (p.muted ? ' muted' : '') +
       (p.solo ? ' solo' : '') +
-      (p.kind === 'gate' ? ' track-gate' : '');
+      (p.kind === 'gate' ? ' track-gate' : '') +
+      (keyboardTrack === name ? ' keyboard-armed' : '');
     track.dataset.target = name;
 
     const bar = document.createElement('div');
@@ -1703,6 +1857,16 @@
     }
 
     bar.appendChild(nameEl);
+
+    if (isMidiKeyboardTrack(name)) {
+      const btnKb = document.createElement('button');
+      btnKb.type = 'button';
+      btnKb.className = 'btn-kb' + (keyboardTrack === name ? ' active' : '');
+      btnKb.textContent = '⌨';
+      btnKb.title = 'Open scale keyboard for this track';
+      btnKb.addEventListener('click', () => armKeyboardTrack(name));
+      bar.appendChild(btnKb);
+    }
 
     if (p.kind !== 'gate') {
       const gatePick = document.createElement('label');
@@ -1921,7 +2085,7 @@
     const grid = document.createElement('div');
     grid.className = 'grid' + (p.kind === 'gate' ? ' grid-gate' : '');
     for (let i = 0; i < 16; i++) {
-      grid.appendChild(makeStep(i, p));
+      grid.appendChild(makeStep(i, p, name));
     }
 
     gridScroll.appendChild(grid);
@@ -1932,6 +2096,447 @@
     bindTrackKeyboard(track, name, p);
     return track;
   }
+
+  function isMidiKeyboardTrack(name) {
+    const p = patterns[name];
+    return !!(p && p.kind !== 'gate' && p.mode === 'midi');
+  }
+
+  function recordingActive() {
+    return recArmed && anyTrackRunning();
+  }
+
+  function defaultKeyboardOctave(p) {
+    const mm = laneMinMax(p);
+    const mid = Math.round((mm.min + mm.max) / 2);
+    return Math.max(0, Math.min(10, Math.floor(mid / 12)));
+  }
+
+  function computeKeyboardPads() {
+    if (!keyboardTrack) {
+      keyboardPads = [];
+      return;
+    }
+    const p = patterns[keyboardTrack];
+    if (!p || !isMidiKeyboardTrack(keyboardTrack)) {
+      keyboardPads = [];
+      return;
+    }
+    const mm = laneMinMax(p);
+    const degrees = SCALES[scaleName] || SCALES.chromatic;
+    const pads = [];
+    for (const d of degrees) {
+      let midi = keyboardOctave * 12 + d;
+      while (midi < mm.min) midi += 12;
+      while (midi > mm.max) midi -= 12;
+      if (midi >= mm.min && midi <= mm.max) {
+        const snapped = snapMidi(midi);
+        pads.push({ midi: snapped, label: midiName(snapped) });
+      }
+    }
+    keyboardPads = pads;
+  }
+
+  function armKeyboardTrack(name) {
+    if (keyboardTrack === name) {
+      keyboardTrack = null;
+      recArmed = false;
+      heldPadIndex = -1;
+      updateKeyboardDrawer();
+      render();
+      return;
+    }
+    if (!isMidiKeyboardTrack(name)) return;
+    keyboardTrack = name;
+    const p = patterns[name];
+    keyboardOctave = defaultKeyboardOctave(p);
+    computeKeyboardPads();
+    updateKeyboardDrawer();
+    render();
+  }
+
+  function previewPadMidi(midi) {
+    if (!keyboardTrack) return;
+    const p = patterns[keyboardTrack];
+    if (!p) return;
+    vscode.postMessage({
+      type: 'fire',
+      target: keyboardTrack,
+      value: midi,
+      gateOn: true,
+      gate: p.gate || undefined,
+      mode: 'midi',
+      kind: p.kind || 'float',
+    });
+  }
+
+  function writeStepNote(trackName, stepIdx, midi) {
+    const p = patterns[trackName];
+    if (!p || !isMidiKeyboardTrack(trackName)) return;
+    ensureBanks(p);
+    const bank = p.banks[p.editBank];
+    bank.values[stepIdx] = snapMidi(midi);
+    bank.gates[stepIdx] = 1;
+    bank.probs[stepIdx] = 1;
+    setEditBank(p, p.editBank);
+    persist();
+    if (!p.running || p.editBank === p.activeBank) dumpTransportSoon();
+    refreshStepCell(trackName, stepIdx);
+  }
+
+  function refreshStepCell(trackName, stepIdx) {
+    if (!tracksEl) return;
+    const track = tracksEl.querySelector('.track[data-target="' + trackName + '"]');
+    if (!track) return;
+    const step = track.querySelector('.step[data-index="' + stepIdx + '"]');
+    if (!step) return;
+    const p = patterns[trackName];
+    if (!p) return;
+    const fill = step.querySelector('.pitch-fill');
+    const label = step.querySelector('.pitch-label');
+    const gate = step.querySelector('.gate');
+    if (fill && label) {
+      let v = p.values[stepIdx];
+      if (p.mode === 'midi') v = snapMidi(v);
+      const t = (v - p.min) / Math.max(1e-9, p.max - p.min);
+      fill.style.height = Math.max(4, t * 100) + '%';
+      label.textContent =
+        p.mode === 'midi' ? midiName(v) : fmtRaw(p.values[stepIdx], p.quant);
+    }
+    if (gate) paintGateProb(gate, p, stepIdx);
+  }
+
+  function maybeStartRecordTransport() {
+    if (!recArmed || anyTrackRunning() || !keyboardTrack) return;
+    const p = patterns[keyboardTrack];
+    if (!p) return;
+    const already = anyTrackRunning();
+    if (!already) sharedPlayhead = 0;
+    p.running = true;
+    p.playhead = already ? sharedPlayhead : 0;
+    setEditBank(p, p.activeBank);
+    resyncRunning(true);
+    for (const name of trackOrder) updatePlayhead(name);
+    persist();
+    refreshKeyboardDrawerState();
+  }
+
+  function captureRecordAtStep(step) {
+    if (!recArmed || !keyboardTrack || heldPadIndex < 0) return;
+    if (!anyTrackRunning()) return;
+    if (lastRecordStep === step) return;
+    lastRecordStep = step;
+    const pad = keyboardPads[heldPadIndex];
+    if (!pad) return;
+    writeStepNote(keyboardTrack, step, pad.midi);
+  }
+
+  function onPadPress(padIndex) {
+    if (!keyboardTrack || padIndex < 0 || padIndex >= keyboardPads.length) return;
+    if (Date.now() < suppressPadUntil) return;
+    heldPadIndex = padIndex;
+    const pad = keyboardPads[padIndex];
+    previewPadMidi(pad.midi);
+
+    if (stepInputMode) {
+      writeStepNote(keyboardTrack, selectedStep, pad.midi);
+      selectedStep = (selectedStep + 1) % 16;
+      updateStepSelection();
+      return;
+    }
+
+    if (recArmed) {
+      if (!anyTrackRunning()) {
+        maybeStartRecordTransport();
+      }
+      lastRecordStep = -1;
+      captureRecordAtStep(sharedPlayhead);
+    }
+    updateKeyboardPadVisuals();
+  }
+
+  function onPadRelease() {
+    heldPadIndex = -1;
+    updateKeyboardPadVisuals();
+  }
+
+
+  function updateStepSelection() {
+    if (!tracksEl || !keyboardTrack) return;
+    const track = tracksEl.querySelector('.track[data-target="' + keyboardTrack + '"]');
+    if (!track) return;
+    track.querySelectorAll('.step').forEach((el) => {
+      const idx = Number(el.dataset.index);
+      el.classList.toggle('step-input-selected', stepInputMode && idx === selectedStep);
+    });
+    updateChaseRow();
+  }
+
+  function updateChaseRow() {
+    if (!keyboardDrawerEl) return;
+    keyboardDrawerEl.querySelectorAll('.kb-chase-dot').forEach((el) => {
+      const idx = Number(el.dataset.step);
+      const active = anyTrackRunning() && idx === sharedPlayhead;
+      el.classList.toggle('active', active);
+      el.classList.toggle('selected', stepInputMode && idx === selectedStep);
+    });
+    if (!tracksEl || !keyboardTrack) return;
+    const track = tracksEl.querySelector('.track[data-target="' + keyboardTrack + '"]');
+    if (!track) return;
+    track.querySelectorAll('.step').forEach((el) => {
+      const idx = Number(el.dataset.index);
+      el.classList.toggle(
+        'keyboard-chase',
+        keyboardTrack && anyTrackRunning() && idx === sharedPlayhead
+      );
+    });
+  }
+
+  function updateKeyboardPadVisuals() {
+    if (!keyboardDrawerEl) return;
+    keyboardDrawerEl.querySelectorAll('.kb-pad').forEach((el, i) => {
+      el.classList.toggle('pressed', i === heldPadIndex);
+    });
+  }
+
+  function refreshKeyboardDrawerState() {
+    if (!keyboardDrawerEl || keyboardDrawerEl.classList.contains('hidden')) return;
+
+    const label = keyboardDrawerEl.querySelector('.kb-label');
+    if (label && keyboardTrack) {
+      const p = patterns[keyboardTrack];
+      if (p) {
+        const mm = laneMinMax(p);
+        label.textContent =
+          keyboardTrack + ' · ' + midiName(mm.min) + '–' + midiName(mm.max);
+      }
+    }
+
+    const btnRec = keyboardDrawerEl.querySelector('.kb-rec');
+    if (btnRec) {
+      btnRec.classList.toggle('recording', recArmed && recordingActive());
+      btnRec.classList.toggle('armed', recArmed && !recordingActive());
+    }
+
+    const btnStep = keyboardDrawerEl.querySelector('.kb-step');
+    if (btnStep) btnStep.classList.toggle('active', stepInputMode);
+
+    const hint = keyboardDrawerEl.querySelector('.kb-hint');
+    if (hint) {
+      let hintText = 'Rec → Run → play pads. Lower BPM to learn. Keys 1–7 = pads.';
+      if (scaleName === 'phrygian') {
+        hintText += ' Try pentatonic_min scale for simpler lines.';
+      }
+      if (recArmed && !useChuckClock()) {
+        hintText = 'Sync ON required for loop record.';
+      }
+      hint.textContent = hintText;
+    }
+
+    const pads = keyboardDrawerEl.querySelectorAll('.kb-pad');
+    keyboardPads.forEach((pad, i) => {
+      if (pads[i]) pads[i].textContent = pad.label;
+    });
+
+    updateChaseRow();
+    updateKeyboardPadVisuals();
+  }
+
+  function updateKeyboardDrawer() {
+    if (!keyboardDrawerEl) return;
+    const visible = !!keyboardTrack && isMidiKeyboardTrack(keyboardTrack);
+    keyboardDrawerEl.classList.toggle('hidden', !visible);
+    keyboardDrawerEl.setAttribute('aria-hidden', visible ? 'false' : 'true');
+    if (!visible) {
+      drawerBuiltFor = null;
+      return;
+    }
+
+    const p = patterns[keyboardTrack];
+    const mm = laneMinMax(p);
+    computeKeyboardPads();
+
+    const needsRebuild =
+      drawerBuiltFor !== keyboardTrack ||
+      keyboardOctave !== keyboardDrawerEl.dataset.octave ||
+      scaleName !== keyboardDrawerEl.dataset.scale;
+
+    if (!needsRebuild && keyboardDrawerEl.querySelector('.kb-main')) {
+      refreshKeyboardDrawerState();
+      return;
+    }
+
+    suppressPadUntil = Date.now() + 200;
+    drawerBuiltFor = keyboardTrack;
+    keyboardDrawerEl.dataset.octave = String(keyboardOctave);
+    keyboardDrawerEl.dataset.scale = scaleName;
+
+    keyboardDrawerEl.innerHTML = '';
+
+    const chase = document.createElement('div');
+    chase.className = 'kb-chase';
+    for (let i = 0; i < 16; i++) {
+      const dot = document.createElement('div');
+      dot.className = 'kb-chase-dot';
+      dot.dataset.step = String(i);
+      dot.textContent = String(i + 1);
+      dot.title = 'Step ' + (i + 1);
+      dot.addEventListener('click', () => {
+        if (!stepInputMode) return;
+        selectedStep = i;
+        updateStepSelection();
+      });
+      chase.appendChild(dot);
+    }
+    keyboardDrawerEl.appendChild(chase);
+
+    const main = document.createElement('div');
+    main.className = 'kb-main';
+
+    const label = document.createElement('span');
+    label.className = 'kb-label';
+    label.textContent =
+      keyboardTrack + ' · ' + midiName(mm.min) + '–' + midiName(mm.max);
+    main.appendChild(label);
+
+    const btnOctDn = document.createElement('button');
+    btnOctDn.type = 'button';
+    btnOctDn.textContent = 'Oct−';
+    btnOctDn.title = 'Lower octave';
+    btnOctDn.addEventListener('click', () => {
+      keyboardOctave = Math.max(0, keyboardOctave - 1);
+      computeKeyboardPads();
+      updateKeyboardDrawer();
+    });
+    main.appendChild(btnOctDn);
+
+    const btnOctUp = document.createElement('button');
+    btnOctUp.type = 'button';
+    btnOctUp.textContent = 'Oct+';
+    btnOctUp.title = 'Raise octave';
+    btnOctUp.addEventListener('click', () => {
+      keyboardOctave = Math.min(10, keyboardOctave + 1);
+      computeKeyboardPads();
+      updateKeyboardDrawer();
+    });
+    main.appendChild(btnOctUp);
+
+    const btnRec = document.createElement('button');
+    btnRec.type = 'button';
+    btnRec.className = 'kb-rec';
+    btnRec.textContent = '● Rec';
+    btnRec.title = 'Arm loop record (Volca-style)';
+    if (recArmed && recordingActive()) btnRec.classList.add('recording');
+    else if (recArmed) btnRec.classList.add('armed');
+    btnRec.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      recArmed = !recArmed;
+      lastRecordStep = -1;
+      refreshKeyboardDrawerState();
+    });
+    main.appendChild(btnRec);
+
+    const btnStep = document.createElement('button');
+    btnStep.type = 'button';
+    btnStep.className = 'kb-step';
+    btnStep.textContent = 'Step';
+    btnStep.title = 'Step input (S.rEc-style)';
+    if (stepInputMode) btnStep.classList.add('active');
+    btnStep.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      stepInputMode = !stepInputMode;
+      updateStepSelection();
+      refreshKeyboardDrawerState();
+    });
+    main.appendChild(btnStep);
+
+    const pads = document.createElement('div');
+    pads.className = 'kb-pads';
+    keyboardPads.forEach((pad, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'kb-pad';
+      b.textContent = pad.label;
+      b.title = 'Keys 1–' + keyboardPads.length + ' on keyboard';
+      b.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        onPadPress(i);
+      });
+      b.addEventListener('pointerup', onPadRelease);
+      b.addEventListener('pointerleave', onPadRelease);
+      pads.appendChild(b);
+    });
+    main.appendChild(pads);
+
+    const suggestSel = document.createElement('select');
+    suggestSel.className = 'groove-preset';
+    suggestSel.title = 'Harmonic suggest style';
+    for (const [val, lab] of [
+      ['walk', 'Walk'],
+      ['bass', 'Bass'],
+      ['arp', 'Arp'],
+      ['motif', 'Motif'],
+    ]) {
+      const o = document.createElement('option');
+      o.value = val;
+      o.textContent = lab;
+      if (val === drawerSuggestStyle) o.selected = true;
+      suggestSel.appendChild(o);
+    }
+    suggestSel.addEventListener('change', () => {
+      drawerSuggestStyle = suggestSel.value || 'walk';
+    });
+    main.appendChild(suggestSel);
+
+    const btnSuggest = document.createElement('button');
+    btnSuggest.type = 'button';
+    btnSuggest.textContent = 'Suggest';
+    btnSuggest.title = 'Seed edit bank with harmonic pattern';
+    btnSuggest.addEventListener('click', () => {
+      if (!keyboardTrack) return;
+      applySuggestToTrack(keyboardTrack, drawerSuggestStyle);
+    });
+    main.appendChild(btnSuggest);
+
+    keyboardDrawerEl.appendChild(main);
+
+    const hint = document.createElement('div');
+    hint.className = 'kb-hint';
+    let hintText = 'Rec → Run → play pads. Lower BPM to learn. Keys 1–7 = pads.';
+    if (scaleName === 'phrygian') {
+      hintText += ' Try pentatonic_min scale for simpler lines.';
+    }
+    if (recArmed && !useChuckClock()) {
+      hintText = 'Sync ON required for loop record.';
+    }
+    hint.textContent = hintText;
+    keyboardDrawerEl.appendChild(hint);
+
+    refreshKeyboardDrawerState();
+  }
+
+  function handleKeyboardKeydown(e) {
+    if (!keyboardTrack || keyboardPads.length === 0) return;
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') {
+      return;
+    }
+    const keyMap = { '1': 0, '2': 1, '3': 2, '4': 3, '5': 4, '6': 5, '7': 6, '8': 7, '9': 8 };
+    const idx = keyMap[e.key];
+    if (idx === undefined || idx >= keyboardPads.length) return;
+    if (e.repeat) return;
+    e.preventDefault();
+    onPadPress(idx);
+  }
+
+  function handleKeyboardKeyup(e) {
+    const keyMap = { '1': 0, '2': 1, '3': 2, '4': 3, '5': 4, '6': 5, '7': 6, '8': 7, '9': 8 };
+    if (keyMap[e.key] !== undefined) onPadRelease();
+  }
+
+  document.addEventListener('keydown', handleKeyboardKeydown);
+  document.addEventListener('keyup', handleKeyboardKeyup);
 
   function render() {
     if (!tracksEl) return;
@@ -1961,6 +2566,11 @@
     for (const name of trackOrder) {
       updatePlayhead(name);
     }
+    if (keyboardTrack && !isMidiKeyboardTrack(keyboardTrack)) {
+      keyboardTrack = null;
+      recArmed = false;
+    }
+    updateKeyboardDrawer();
   }
 
   function updateHint() {
@@ -2181,6 +2791,7 @@
       }
       for (const name of trackOrder) updatePlayhead(name);
       persist();
+      refreshKeyboardDrawerState();
     });
   }
   if (btnSaveAs) {
@@ -2213,6 +2824,7 @@
       }
       persist();
       render();
+      if (keyboardTrack) updateKeyboardDrawer();
     });
   }
   if (masterBpmIn) {
@@ -2312,6 +2924,7 @@
       if (msg.wrapped || (prev === 15 && step === 0)) {
         patternPendingHint = false;
         updateHint();
+        lastRecordStep = -1;
         let swapped = false;
         for (const name of trackOrder) {
           const p = patterns[name];
@@ -2329,6 +2942,7 @@
         if (p.running) p.playhead = step;
         updatePlayhead(name);
       }
+      captureRecordAtStep(step);
       return;
     }
     if (msg.type === 'bridgeReady') {

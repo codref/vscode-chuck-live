@@ -1006,6 +1006,7 @@ export class SeqPanel {
   </header>
   <p class="hint" id="hint">Tracks · scale lock (midi) · sync = ChucK 16ths</p>
   <div id="tracks"></div>
+  <div id="keyboardDrawer" class="keyboard-drawer hidden" aria-hidden="true"></div>
   <script nonce="${nonce}" src="${js}?v=${bust}"></script>
 </body>
 </html>`;

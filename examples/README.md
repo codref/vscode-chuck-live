@@ -238,6 +238,17 @@ global Event dk_kick;
 - **M / S**: mute or solo without stopping the clock (unlike Stop)  
 - **Save As… / Load…**: JSON or `.ck` under `.chuck-live/patterns/` (init / **Import Bundled Patterns** seeds from `examples/sequences/`)
 
+### Keyboard drawer (MIDI tracks)
+
+For any **MIDI** lane (`@seq mode=midi`, e.g. `ps_noteHz`, `ab_noteHz`):
+
+1. Click **⌨** on the track bar — bottom drawer opens with **scale pads** (one button per scale degree; uses header **Scale**).
+2. **Play** — press pads to audition (OSC preview + gate).
+3. **Step** — click a step column, then pads to write notes one step at a time (auto-advances). Volca Bass **S.rEc**-style.
+4. **● Rec** → **Run all** → play pads while the step chase moves — notes quantize to 16ths (Volca Keys loop record). Lower **Master BPM** while learning.
+5. **Suggest** (Walk / Bass / Arp / Motif) — seed the edit bank with an in-scale melody; also in each track’s **Gen** transform row.
+6. Keys **1–7** (and **8–9** on larger scales) mirror the pads.
+
 ### Transport bus (`live_*`)
 
 Always declared by the OSC bridge (and driven by the transport shred when Sync is on):
