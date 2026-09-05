@@ -128,18 +128,6 @@ body {
   background: #7a6b9a !important;
 }
 
-.module.peaking {
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 0 10px rgba(224, 176, 64, 0.35);
-}
-
-.module.clipping {
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 0 12px rgba(229, 85, 85, 0.5);
-}
-
 .module::before,
 .module::after {
   content: "";
@@ -186,7 +174,6 @@ body {
 .mod-accent {
   height: 10px;
   margin: 0 4px 8px;
-  padding-right: 16px;
   border-radius: 2px;
   opacity: 0.95;
   flex-shrink: 0;
@@ -195,79 +182,58 @@ body {
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.45);
 }
 
-.mod-peak-fill {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 0%;
-  background: linear-gradient(
-    90deg,
-    rgba(120, 220, 150, 0.55) 0%,
-    rgba(200, 255, 210, 0.95) 100%
-  );
-  box-shadow: 0 0 10px rgba(120, 220, 150, 0.65);
-  pointer-events: none;
-  transition: width 35ms linear;
+.mod-presets {
+  flex-shrink: 0;
+  margin: 0 2px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.mod-peak-fill.hot {
-  background: linear-gradient(
-    90deg,
-    rgba(224, 176, 64, 0.65) 0%,
-    rgba(255, 220, 120, 0.98) 100%
-  );
-  box-shadow: 0 0 12px rgba(224, 176, 64, 0.85);
+.preset-select {
+  width: 100%;
+  font-size: 10px;
+  padding: 3px 4px;
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #1e2228;
+  color: var(--label);
 }
 
-.mod-peak-fill.clip {
-  background: linear-gradient(
-    90deg,
-    rgba(229, 85, 85, 0.75) 0%,
-    rgba(255, 140, 140, 1) 100%
-  );
-  box-shadow: 0 0 14px rgba(229, 85, 85, 0.95);
+.preset-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  justify-content: center;
 }
 
-.mod-peak-led {
-  position: absolute;
-  top: 50%;
-  right: 4px;
-  width: 12px;
-  height: 12px;
-  margin-top: -6px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #5a626a, #2a2e33);
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  box-shadow:
-    inset 0 1px 2px rgba(0, 0, 0, 0.55),
-    0 0 0 1px rgba(0, 0, 0, 0.35);
-  z-index: 2;
-  transition: background 50ms linear, box-shadow 50ms linear, border-color 50ms linear;
+.preset-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 8px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 3px 2px;
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #2e3339;
+  color: var(--muted);
+  cursor: pointer;
 }
 
-.mod-peak-led.on {
-  background: radial-gradient(circle at 35% 30%, #b8ffc8, #3d9);
-  border-color: rgba(180, 255, 200, 0.9);
-  box-shadow:
-    0 0 10px rgba(80, 220, 120, 1),
-    inset 0 0 2px rgba(255, 255, 255, 0.5);
+.preset-btn:hover:not(:disabled) {
+  color: var(--label);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
-.mod-peak-led.hot {
-  background: radial-gradient(circle at 35% 30%, #ffe8a0, #e0b040);
-  border-color: rgba(255, 230, 160, 0.95);
-  box-shadow:
-    0 0 12px rgba(224, 176, 64, 1),
-    inset 0 0 2px rgba(255, 255, 255, 0.55);
+.preset-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
-.mod-peak-led.clip {
-  background: radial-gradient(circle at 35% 30%, #ffb0b0, #e55);
-  border-color: rgba(255, 180, 180, 0.95);
-  box-shadow:
-    0 0 14px rgba(229, 85, 85, 1),
-    inset 0 0 2px rgba(255, 255, 255, 0.6);
+.preset-btn-delete:hover:not(:disabled) {
+  border-color: rgba(229, 85, 85, 0.5);
+  color: #f5a0a0;
 }
 
 .controls {

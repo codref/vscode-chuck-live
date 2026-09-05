@@ -26,6 +26,8 @@
   let swingEnabled = saved.swingEnabled === true;
   /** Queue pattern OSC until next 16-step wrap (default on). */
   let applyAtBar = saved.applyAtBar !== undefined ? !!saved.applyAtBar : true;
+  /** track → last selected preset name */
+  if (!saved.presetSel) saved.presetSel = {};
   let sharedPlayhead = 0;
   /** @type {any} */
   let masterTimer = null;
@@ -35,6 +37,8 @@
   let targets = [];
   /** @type {string[]} */
   let gateOptions = [];
+  /** track → preset name list */
+  let presetLists = {};
   /** @type {Record<string, any>} */
   const timers = {};
   /** @type {Record<string, any>} */
@@ -2072,6 +2076,8 @@
     swingLab.appendChild(swingIn);
     bar.appendChild(swingLab);
 
+    bar.appendChild(makeTrackPresetBar(name));
+
     const btnRemove = document.createElement('button');
     btnRemove.type = 'button';
     btnRemove.className = 'remove';
@@ -2588,7 +2594,7 @@
       (useChuckClock()
         ? ' · apply ' + (applyAtBar ? 'at bar' : 'realtime')
         : '') +
-      ' · transforms below each grid · edit bank only · Undo per track · patterns in .chuck-live/patterns/';
+      ' · transforms below each grid · edit bank only · Undo per track · track presets · patterns in .chuck-live/patterns/';
     if (patternPendingHint && applyAtBar && anyTrackRunning()) {
       text = 'queued — applies at bar · ' + text;
     }
@@ -2628,6 +2634,207 @@
       gates: bank.gates.slice(0, 16),
       probs: normalizeProbs(bank.probs),
     };
+  }
+
+  /** Single-track snapshot for .chuck-live/seq-presets/ (not full pattern Save As). */
+  function exportTrackPreset(name) {
+    const p = patterns[name];
+    if (!p) return null;
+    ensureBanks(p);
+    ensurePatternFlags(p);
+    return {
+      kind: p.kind || 'float',
+      mode: p.mode,
+      gate: p.gate || '',
+      swing: clampSwing(p.swing),
+      activeBank: p.activeBank === 'B' ? 'B' : 'A',
+      editBank: p.editBank === 'B' ? 'B' : 'A',
+      banks: {
+        A: exportBank(p.banks.A),
+        B: exportBank(p.banks.B),
+      },
+    };
+  }
+
+  function applyTrackPreset(name, src) {
+    const p = patterns[name];
+    if (!p || !src || typeof src !== 'object') return;
+    ensureBanks(p);
+    if (typeof src.swing === 'number') {
+      p.swing = clampSwing(src.swing);
+    }
+    if (typeof src.gate === 'string') {
+      if (!src.gate || gateOptions.indexOf(src.gate) >= 0) {
+        p.gate = src.gate;
+      }
+    }
+    if (src.banks && src.banks.A && src.banks.B) {
+      p.banks = {
+        A: {
+          values: (src.banks.A.values || []).slice(0, 16),
+          gates: (src.banks.A.gates || []).slice(0, 16),
+          probs: normalizeProbs(src.banks.A.probs),
+        },
+        B: {
+          values: (src.banks.B.values || []).slice(0, 16),
+          gates: (src.banks.B.gates || []).slice(0, 16),
+          probs: normalizeProbs(src.banks.B.probs),
+        },
+      };
+      while (p.banks.A.values.length < 16) p.banks.A.values.push(0);
+      while (p.banks.B.values.length < 16) p.banks.B.values.push(0);
+      while (p.banks.A.gates.length < 16) p.banks.A.gates.push(0);
+      while (p.banks.B.gates.length < 16) p.banks.B.gates.push(0);
+      p.activeBank = src.activeBank === 'B' ? 'B' : 'A';
+      p.editBank = src.editBank === 'B' ? 'B' : 'A';
+      clearQueue(p);
+      ensureBanks(p);
+    }
+    persist();
+    dumpTransportSoon();
+    render();
+  }
+
+  function populateSeqPresetOptions(sel, track, selected) {
+    const names = presetLists[track] || [];
+    sel.innerHTML = '';
+    const empty = document.createElement('option');
+    empty.value = '';
+    empty.textContent = '— seq —';
+    sel.appendChild(empty);
+    for (const n of names) {
+      const o = document.createElement('option');
+      o.value = n;
+      o.textContent = n;
+      if (n === selected) o.selected = true;
+      sel.appendChild(o);
+    }
+  }
+
+  function syncSeqPresetButtons(wrap, selected) {
+    const has = !!selected;
+    for (const btn of wrap.querySelectorAll(
+      '.seq-preset-btn-update, .seq-preset-btn-delete, .seq-preset-btn-restore'
+    )) {
+      btn.disabled = !has;
+    }
+  }
+
+  function refreshSeqPresetDropdown(track, selected) {
+    const card = tracksEl && tracksEl.querySelector('.track[data-target="' + track + '"]');
+    const wrap = card && card.querySelector('.seq-presets');
+    if (!wrap) return;
+    const sel = wrap.querySelector('.seq-preset-select');
+    if (!sel) return;
+    const selName =
+      selected !== undefined ? selected : saved.presetSel[track] || sel.value;
+    populateSeqPresetOptions(sel, track, selName);
+    syncSeqPresetButtons(wrap, sel.value);
+  }
+
+  function makeTrackPresetBar(name) {
+    const wrap = document.createElement('div');
+    wrap.className = 'seq-presets';
+    wrap.title = 'Save / load this track only (.chuck-live/seq-presets/)';
+
+    const sel = document.createElement('select');
+    sel.className = 'seq-preset-select';
+    sel.title = 'Load track sequence preset';
+    populateSeqPresetOptions(sel, name, saved.presetSel[name] || '');
+
+    sel.addEventListener('change', () => {
+      const presetName = sel.value;
+      if (!presetName) {
+        delete saved.presetSel[name];
+        vscode.setState(saved);
+        syncSeqPresetButtons(wrap, '');
+        return;
+      }
+      saved.presetSel[name] = presetName;
+      vscode.setState(saved);
+      syncSeqPresetButtons(wrap, presetName);
+      vscode.postMessage({
+        type: 'loadSeqPreset',
+        track: name,
+        name: presetName,
+      });
+    });
+
+    const btns = document.createElement('div');
+    btns.className = 'seq-preset-btns';
+
+    const btnSave = document.createElement('button');
+    btnSave.type = 'button';
+    btnSave.className = 'seq-preset-btn';
+    btnSave.textContent = 'Save';
+    btnSave.title = 'Save this track as a new sequence preset';
+    btnSave.addEventListener('click', () => {
+      const preset = exportTrackPreset(name);
+      if (!preset) return;
+      vscode.postMessage({
+        type: 'requestSaveSeqPreset',
+        track: name,
+        preset,
+      });
+    });
+
+    const btnUpdate = document.createElement('button');
+    btnUpdate.type = 'button';
+    btnUpdate.className = 'seq-preset-btn seq-preset-btn-update';
+    btnUpdate.textContent = 'Update';
+    btnUpdate.title = 'Overwrite selected track preset';
+    btnUpdate.addEventListener('click', () => {
+      const presetName = sel.value;
+      if (!presetName) return;
+      const preset = exportTrackPreset(name);
+      if (!preset) return;
+      vscode.postMessage({
+        type: 'updateSeqPreset',
+        track: name,
+        name: presetName,
+        preset,
+      });
+    });
+
+    const btnDelete = document.createElement('button');
+    btnDelete.type = 'button';
+    btnDelete.className = 'seq-preset-btn seq-preset-btn-delete';
+    btnDelete.textContent = 'Delete';
+    btnDelete.title = 'Delete selected track preset';
+    btnDelete.addEventListener('click', () => {
+      const presetName = sel.value;
+      if (!presetName) return;
+      vscode.postMessage({
+        type: 'deleteSeqPreset',
+        track: name,
+        name: presetName,
+      });
+    });
+
+    const btnRestore = document.createElement('button');
+    btnRestore.type = 'button';
+    btnRestore.className = 'seq-preset-btn seq-preset-btn-restore';
+    btnRestore.textContent = 'Restore';
+    btnRestore.title = 'Re-apply selected track preset from disk';
+    btnRestore.addEventListener('click', () => {
+      const presetName = sel.value;
+      if (!presetName) return;
+      vscode.postMessage({
+        type: 'loadSeqPreset',
+        track: name,
+        name: presetName,
+      });
+    });
+
+    btns.appendChild(btnSave);
+    btns.appendChild(btnUpdate);
+    btns.appendChild(btnDelete);
+    btns.appendChild(btnRestore);
+
+    wrap.appendChild(sel);
+    wrap.appendChild(btns);
+    syncSeqPresetButtons(wrap, sel.value);
+    return wrap;
   }
 
   function exportPatternSnapshot(name) {
@@ -2882,6 +3089,9 @@
         .join('\0');
       targets = msg.targets || [];
       gateOptions = msg.gates || [];
+      if (msg.presetLists && typeof msg.presetLists === 'object') {
+        presetLists = msg.presetLists;
+      }
       const nextNames = targets
         .map((t) => t.name)
         .sort()
@@ -2899,6 +3109,33 @@
       } else if (useChuckClock() && anyTrackRunning()) {
         publishTransport({ bpm: masterBpm, step: sharedPlayhead });
       }
+      return;
+    }
+    if (msg.type === 'seqPresets' && msg.track) {
+      presetLists[msg.track] = msg.names || [];
+      refreshSeqPresetDropdown(msg.track);
+      return;
+    }
+    if (msg.type === 'seqPresetSaved' && msg.track && msg.name) {
+      saved.presetSel[msg.track] = msg.name;
+      vscode.setState(saved);
+      refreshSeqPresetDropdown(msg.track, msg.name);
+      return;
+    }
+    if (msg.type === 'seqPresetDeleted' && msg.track) {
+      if (saved.presetSel[msg.track] === msg.name) {
+        delete saved.presetSel[msg.track];
+        vscode.setState(saved);
+      }
+      refreshSeqPresetDropdown(msg.track, '');
+      return;
+    }
+    if (msg.type === 'seqPresetLoaded' && msg.track && msg.preset) {
+      if (msg.name) {
+        saved.presetSel[msg.track] = msg.name;
+        vscode.setState(saved);
+      }
+      applyTrackPreset(msg.track, msg.preset);
       return;
     }
     if (msg.type === 'topologyQueued') {

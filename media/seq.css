@@ -178,6 +178,54 @@ body {
   opacity: 0.7;
 }
 
+.seq-presets {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding: 2px 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #141820;
+}
+
+.seq-preset-select {
+  max-width: 110px;
+  font-size: 11px;
+  padding: 3px 4px;
+  background: #11151c;
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+
+.seq-preset-btns {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+
+.seq-preset-btn {
+  padding: 3px 6px !important;
+  font-size: 10px !important;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted) !important;
+}
+
+.seq-preset-btn:hover:not(:disabled) {
+  color: var(--text) !important;
+}
+
+.seq-preset-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.seq-preset-btn-delete:hover:not(:disabled) {
+  border-color: rgba(229, 85, 85, 0.5) !important;
+  color: #f5a0a0 !important;
+}
+
 .bank-group {
   display: flex;
   gap: 2px;

@@ -20,6 +20,14 @@ import {
   collectSeqTargets,
 } from './knobsPanel';
 import { seedBundledPatterns } from './projectInit';
+import {
+  deleteSeqPreset,
+  listSeqPresets,
+  readSeqPreset,
+  sanitizeSeqPresetName,
+  writeSeqPreset,
+  type SeqPresetSnapshot,
+} from './seqPresets';
 
 const PATTERN_NAME_RE = /^[a-zA-Z0-9._-]+$/;
 
@@ -215,7 +223,19 @@ export class SeqPanel {
     if (!this.panel) {
       return;
     }
-    this.panel.webview.postMessage(this.targetsPayload());
+    void this.pushTargetsAsync();
+  }
+
+  private async pushTargetsAsync(): Promise<void> {
+    if (!this.panel) {
+      return;
+    }
+    const payload = this.targetsPayload();
+    const presetLists: Record<string, string[]> = {};
+    for (const t of payload.targets) {
+      presetLists[t.name] = await listSeqPresets(t.name);
+    }
+    this.panel.webview.postMessage({ ...payload, presetLists });
   }
 
   dispose(): void {
@@ -567,6 +587,109 @@ export class SeqPanel {
     }
   }
 
+  private async sendSeqPresetList(track: string): Promise<void> {
+    const names = await listSeqPresets(track);
+    this.panel?.webview.postMessage({
+      type: 'seqPresets',
+      track,
+      names,
+    });
+  }
+
+  private async promptSaveSeqPreset(
+    track: string,
+    preset: Omit<SeqPresetSnapshot, 'version' | 'name' | 'track'> & {
+      banks: SeqPresetSnapshot['banks'];
+    }
+  ): Promise<void> {
+    const name = await vscode.window.showInputBox({
+      prompt: `Track preset name for ${track} (saved under .chuck-live/seq-presets/)`,
+      placeHolder: 'groove-a',
+      validateInput: (v) =>
+        sanitizeSeqPresetName(v)
+          ? undefined
+          : 'Use letters, digits, . _ - only',
+    });
+    if (!name) {
+      return;
+    }
+    await this.handleSaveSeqPreset(track, name, preset, false);
+  }
+
+  private async handleSaveSeqPreset(
+    track: string,
+    name: string,
+    preset: Omit<SeqPresetSnapshot, 'version' | 'name' | 'track'> & {
+      banks: SeqPresetSnapshot['banks'];
+    },
+    isUpdate: boolean
+  ): Promise<void> {
+    const safe = sanitizeSeqPresetName(name);
+    if (!safe) {
+      return;
+    }
+    if (isUpdate) {
+      const existing = await readSeqPreset(track, safe);
+      if (!existing) {
+        void vscode.window.showErrorMessage(`Track preset “${safe}” not found.`);
+        return;
+      }
+    }
+    const ok = await writeSeqPreset(track, safe, preset);
+    if (ok) {
+      await this.sendSeqPresetList(track);
+      this.panel?.webview.postMessage({
+        type: 'seqPresetSaved',
+        track,
+        name: safe,
+      });
+    }
+  }
+
+  private async handleDeleteSeqPreset(
+    track: string,
+    name: string
+  ): Promise<void> {
+    const safe = sanitizeSeqPresetName(name);
+    if (!safe) {
+      return;
+    }
+    const pick = await vscode.window.showWarningMessage(
+      `Delete track preset “${safe}” for ${track}?`,
+      { modal: true },
+      'Delete'
+    );
+    if (pick !== 'Delete') {
+      return;
+    }
+    const ok = await deleteSeqPreset(track, safe);
+    if (ok) {
+      await this.sendSeqPresetList(track);
+      this.panel?.webview.postMessage({
+        type: 'seqPresetDeleted',
+        track,
+        name: safe,
+      });
+    }
+  }
+
+  private async handleLoadSeqPreset(
+    track: string,
+    name: string
+  ): Promise<void> {
+    const snap = await readSeqPreset(track, name);
+    if (!snap) {
+      void vscode.window.showErrorMessage(`Could not load track preset “${name}”.`);
+      return;
+    }
+    this.panel?.webview.postMessage({
+      type: 'seqPresetLoaded',
+      track,
+      name: snap.name,
+      preset: snap,
+    });
+  }
+
   private publishTransportBus(msg: {
     bpm?: number;
     step?: number;
@@ -896,6 +1019,9 @@ export class SeqPanel {
     running?: boolean;
     tick?: boolean;
     swingEnabled?: boolean;
+    track?: string;
+    name?: string;
+    preset?: SeqPresetSnapshot | Omit<SeqPresetSnapshot, 'version' | 'name' | 'track'>;
   }): Promise<void> {
     if (msg.type === 'requestSavePattern') {
       await this.handleSavePattern(msg.data);
@@ -903,6 +1029,31 @@ export class SeqPanel {
     }
     if (msg.type === 'requestLoadPattern') {
       await this.handleLoadPattern();
+      return;
+    }
+
+    if (msg.type === 'listSeqPresets' && msg.track) {
+      await this.sendSeqPresetList(msg.track);
+      return;
+    }
+    if (msg.type === 'requestSaveSeqPreset' && msg.track && msg.preset) {
+      await this.promptSaveSeqPreset(msg.track, msg.preset);
+      return;
+    }
+    if (msg.type === 'saveSeqPreset' && msg.track && msg.name && msg.preset) {
+      await this.handleSaveSeqPreset(msg.track, msg.name, msg.preset, false);
+      return;
+    }
+    if (msg.type === 'updateSeqPreset' && msg.track && msg.name && msg.preset) {
+      await this.handleSaveSeqPreset(msg.track, msg.name, msg.preset, true);
+      return;
+    }
+    if (msg.type === 'deleteSeqPreset' && msg.track && msg.name) {
+      await this.handleDeleteSeqPreset(msg.track, msg.name);
+      return;
+    }
+    if (msg.type === 'loadSeqPreset' && msg.track && msg.name) {
+      await this.handleLoadSeqPreset(msg.track, msg.name);
       return;
     }
 

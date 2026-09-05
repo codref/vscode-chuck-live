@@ -14,14 +14,13 @@ import {
 import { StatusBar } from './statusBar';
 import { KnobsPanelProvider, collectAnnotations } from './knobsPanel';
 import { writeBridgeFile } from './bridgeGen';
-import { writeMeterFile, meterTapName, MeterTap } from './meterGen';
+import { writeMeterFile } from './meterGen';
 import { writeTransportFile } from './transportGen';
 import { writeModMatrixFile } from './modGen';
 import {
   collectModCodegen,
   collectModTargetsForBridge,
 } from './modModel';
-import { buildModulesFromShreds } from './rackModel';
 import { RackPanel } from './rackPanel';
 import { SeqPanel } from './seqPanel';
 import { WiringPanelProvider } from './wiringPanel';
@@ -110,20 +109,9 @@ export function activate(context: vscode.ExtensionContext): void {
       return false;
     }
     const { meterPort } = getConfig();
-    const modules = buildModulesFromShreds(shredOps);
-    const taps: MeterTap[] = modules
-      .filter((m) => !m.isMaster && !m.isTransport)
-      .map((m) => ({
-        shredId: m.id,
-        name: meterTapName(m.file || m.title),
-      }));
-    const meterFile = writeMeterFile(meterPort, taps);
+    const meterFile = writeMeterFile(meterPort, []);
     try {
-      const loaded = await shredOps.loadMeter(meterFile.path, meterFile.source);
-      if (loaded) {
-        rack.setPeakIds(taps.map((t) => t.shredId));
-      }
-      return loaded;
+      return await shredOps.loadMeter(meterFile.path, meterFile.source);
     } catch (err) {
       vm.output.appendLine(`[warn] meter load: ${err}`);
       return false;

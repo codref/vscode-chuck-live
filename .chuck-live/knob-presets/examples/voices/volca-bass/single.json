@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "name": "single",
+  "module": "examples/voices/volca-bass.ck",
+  "values": {
+    "vb_noteHz": 44,
+    "vb_accent": 0.3,
+    "vb_plockCut": 0.69,
+    "vb_slide": 0.15,
+    "vb_vco1": 0,
+    "vb_vco2": 0,
+    "vb_vco3": 0.65,
+    "vb_detune": 0.12,
+    "vb_vco2Oct": 0.5,
+    "vb_vco3Oct": 0.5,
+    "vb_pulse": 0.48,
+    "vb_cutoff": 1470,
+    "vb_peak": 1.9,
+    "vb_egDecay": 375,
+    "vb_egInt": 0.41,
+    "vb_feedback": 0.43,
+    "vb_amp": 0.45,
+    "vb_accentAmt": 0.26,
+    "vb_slideTime": 190
+  }
+}

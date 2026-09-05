@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { Annotation, parseAnnotations } from './annotations';
 import { LIVE_TRANSPORT } from './bridgeGen';
 import { resolveChuckPath } from './chuckPaths';
+import { modulePresetKey } from './knobPresets';
 import { ShredOps, isFileModule } from './shredOps';
 
 /** One Eurorack-style module = one loaded (non-bridge) shred + its annotations. */
@@ -19,6 +20,8 @@ export interface RackModule {
   id: number;
   title: string;
   file: string;
+  /** Workspace-relative path key for knob presets (no .ck). */
+  moduleKey: string;
   knobs: Annotation[];
   /** Layout groups for rack faceplate (primary + section dividers). */
   groups: RackControlGroup[];
@@ -129,6 +132,7 @@ export function buildModulesFromShreds(shredOps: ShredOps): RackModule[] {
       id: shred.id,
       title,
       file,
+      moduleKey: modulePresetKey(file),
       knobs,
       groups: buildRackControlGroups(knobs),
       isMaster:
@@ -166,6 +170,7 @@ export function buildTransportRackModule(bpm = 120): RackModule {
     id: -1,
     title: 'sequencer',
     file: 'chuck-live-transport',
+    moduleKey: 'chuck-live-transport',
     isTransport: true,
     knobs,
     groups: [{ knobs }],

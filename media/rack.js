@@ -1,36 +1,54 @@
 (function () {
   const vscode = acquireVsCodeApi();
   const caseEl = document.getElementById('case');
-  const saved = vscode.getState() || { values: {} };
+  const saved = vscode.getState() || { values: {}, presetSel: {} };
+  if (!saved.presetSel) saved.presetSel = {};
+
+  /** moduleFile → preset name list (from extension). */
+  let presetLists = {};
 
   const ANGLE_MIN = -135;
   const ANGLE_MAX = 135;
 
   const DB_MIN = -60;
-  const LED_ON_DB = -48;
   const LED_HOT_DB = -6;
   const LED_CLIP_DB = -0.1;
-  const LED_HOLD_MS = 450;
-
-  const ledHoldUntil = {};
 
   window.addEventListener('message', (event) => {
     const msg = event.data;
     if (msg.type === 'setRack') {
+      presetLists = msg.presetLists || {};
       render(msg.modules || []);
     } else if (msg.type === 'setKnob' && msg.name !== undefined && msg.value !== undefined) {
-      applyKnobValue(msg.name, Number(msg.value));
+      applyKnobValue(msg.name, Number(msg.value), false);
     } else if (msg.type === 'vu') {
       paintMasterVu(Number(msg.l) || 0, Number(msg.r) || 0);
-    } else if (msg.type === 'peaks') {
-      paintPeaks(msg.peaks || {});
     } else if (msg.type === 'resetMeter') {
       resetMeterUi();
+    } else if (msg.type === 'knobPresets' && msg.moduleFile) {
+      presetLists[msg.moduleFile] = msg.names || [];
+      refreshPresetDropdown(msg.moduleFile);
+    } else if (msg.type === 'knobPresetSaved' && msg.moduleFile && msg.name) {
+      saved.presetSel[msg.moduleFile] = msg.name;
+      vscode.setState(saved);
+      refreshPresetDropdown(msg.moduleFile, msg.name);
+    } else if (msg.type === 'knobPresetDeleted' && msg.moduleFile) {
+      if (saved.presetSel[msg.moduleFile] === msg.name) {
+        delete saved.presetSel[msg.moduleFile];
+        vscode.setState(saved);
+      }
+      refreshPresetDropdown(msg.moduleFile, '');
+    } else if (msg.type === 'applyKnobPreset' && msg.moduleFile && msg.values) {
+      if (msg.name) {
+        saved.presetSel[msg.moduleFile] = msg.name;
+        vscode.setState(saved);
+        refreshPresetDropdown(msg.moduleFile, msg.name);
+      }
+      applyModulePreset(msg.moduleFile, msg.values, false);
     }
   });
 
   vscode.postMessage({ type: 'ready' });
-  requestAnimationFrame(meterTick);
 
   function render(modules) {
     if (!caseEl) return;
@@ -51,12 +69,19 @@
     }
   }
 
+  function hasKnobControls(mod) {
+    return (mod.knobs || []).some(
+      (k) => k.kind === 'knob' && (k.type === 'float' || k.type === 'int')
+    );
+  }
+
   function makeModule(mod) {
     const el = document.createElement('div');
     el.className =
       'module' +
       (mod.isMaster ? ' master' : '') +
       (mod.isTransport ? ' transport' : '');
+    el.dataset.moduleFile = mod.file || '';
     if (mod.isTransport) {
       el.dataset.shredId = 'transport';
     } else {
@@ -120,21 +145,182 @@
     }
 
     el.appendChild(accent);
-    if (!mod.isMaster && !mod.isTransport) {
-      const led = document.createElement('div');
-      led.className = 'mod-peak-led';
-      led.title = 'Peak';
-      accent.appendChild(led);
-      const peakFill = document.createElement('div');
-      peakFill.className = 'mod-peak-fill';
-      accent.appendChild(peakFill);
-    }
     el.appendChild(head);
+    if (!mod.isTransport && hasKnobControls(mod)) {
+      el.appendChild(makePresetBar(mod));
+    }
     el.appendChild(controls);
     if (mod.isMaster) {
       el.appendChild(makeMasterMeter());
     }
     return el;
+  }
+
+  function makePresetBar(mod) {
+    const bar = document.createElement('div');
+    bar.className = 'mod-presets';
+    bar.dataset.moduleFile = mod.file;
+
+    const sel = document.createElement('select');
+    sel.className = 'preset-select';
+    sel.title = 'Load knob preset';
+    populatePresetOptions(sel, mod.file, saved.presetSel[mod.file] || '');
+
+    sel.addEventListener('change', () => {
+      const name = sel.value;
+      if (!name) {
+        delete saved.presetSel[mod.file];
+        vscode.setState(saved);
+        syncPresetButtons(bar, '');
+        return;
+      }
+      saved.presetSel[mod.file] = name;
+      vscode.setState(saved);
+      syncPresetButtons(bar, name);
+      vscode.postMessage({
+        type: 'loadKnobPreset',
+        moduleFile: mod.file,
+        name,
+      });
+    });
+
+    const btns = document.createElement('div');
+    btns.className = 'preset-btns';
+
+    const btnSave = document.createElement('button');
+    btnSave.type = 'button';
+    btnSave.className = 'preset-btn';
+    btnSave.textContent = 'Save';
+    btnSave.title = 'Save current knobs as new preset';
+    btnSave.addEventListener('click', () => {
+      vscode.postMessage({
+        type: 'requestSaveKnobPreset',
+        moduleFile: mod.file,
+        values: collectModuleValues(mod),
+      });
+    });
+
+    const btnUpdate = document.createElement('button');
+    btnUpdate.type = 'button';
+    btnUpdate.className = 'preset-btn preset-btn-update';
+    btnUpdate.textContent = 'Update';
+    btnUpdate.title = 'Overwrite selected preset with current knobs';
+    btnUpdate.addEventListener('click', () => {
+      const name = sel.value;
+      if (!name) return;
+      vscode.postMessage({
+        type: 'updateKnobPreset',
+        moduleFile: mod.file,
+        name,
+        values: collectModuleValues(mod),
+      });
+    });
+
+    const btnDelete = document.createElement('button');
+    btnDelete.type = 'button';
+    btnDelete.className = 'preset-btn preset-btn-delete';
+    btnDelete.textContent = 'Delete';
+    btnDelete.title = 'Delete selected preset';
+    btnDelete.addEventListener('click', () => {
+      const name = sel.value;
+      if (!name) return;
+      vscode.postMessage({
+        type: 'deleteKnobPreset',
+        moduleFile: mod.file,
+        name,
+      });
+    });
+
+    const btnRestore = document.createElement('button');
+    btnRestore.type = 'button';
+    btnRestore.className = 'preset-btn preset-btn-restore';
+    btnRestore.textContent = 'Restore';
+    btnRestore.title = 'Re-apply selected preset from disk';
+    btnRestore.addEventListener('click', () => {
+      const name = sel.value;
+      if (!name) return;
+      vscode.postMessage({
+        type: 'loadKnobPreset',
+        moduleFile: mod.file,
+        name,
+      });
+    });
+
+    btns.appendChild(btnSave);
+    btns.appendChild(btnUpdate);
+    btns.appendChild(btnDelete);
+    btns.appendChild(btnRestore);
+
+    bar.appendChild(sel);
+    bar.appendChild(btns);
+    syncPresetButtons(bar, sel.value);
+    return bar;
+  }
+
+  function populatePresetOptions(sel, moduleFile, selected) {
+    const names = presetLists[moduleFile] || [];
+    sel.innerHTML = '';
+    const empty = document.createElement('option');
+    empty.value = '';
+    empty.textContent = '— preset —';
+    sel.appendChild(empty);
+    for (const name of names) {
+      const o = document.createElement('option');
+      o.value = name;
+      o.textContent = name;
+      if (name === selected) o.selected = true;
+      sel.appendChild(o);
+    }
+  }
+
+  function findModuleEl(moduleFile) {
+    if (!caseEl) return null;
+    for (const el of caseEl.querySelectorAll('.module[data-module-file]')) {
+      if (el.dataset.moduleFile === moduleFile) return el;
+    }
+    return null;
+  }
+
+  function refreshPresetDropdown(moduleFile, selected) {
+    const modEl = findModuleEl(moduleFile);
+    const bar = modEl && modEl.querySelector('.mod-presets');
+    if (!bar) return;
+    const sel = bar.querySelector('.preset-select');
+    if (!sel) return;
+    const selName =
+      selected !== undefined ? selected : saved.presetSel[moduleFile] || sel.value;
+    populatePresetOptions(sel, moduleFile, selName);
+    syncPresetButtons(bar, sel.value);
+  }
+
+  function syncPresetButtons(bar, selected) {
+    const has = !!selected;
+    for (const btn of bar.querySelectorAll(
+      '.preset-btn-update, .preset-btn-delete, .preset-btn-restore'
+    )) {
+      btn.disabled = !has;
+    }
+  }
+
+  function collectModuleValues(mod) {
+    const values = {};
+    for (const k of mod.knobs || []) {
+      if (k.kind !== 'knob' || (k.type !== 'float' && k.type !== 'int')) {
+        continue;
+      }
+      const min = k.min ?? 0;
+      values[k.name] =
+        saved.values[k.name] !== undefined
+          ? Number(saved.values[k.name])
+          : (k.default ?? min);
+    }
+    return values;
+  }
+
+  function applyModulePreset(moduleFile, values, sendOsc) {
+    for (const [name, value] of Object.entries(values)) {
+      applyKnobValue(name, Number(value), sendOsc, moduleFile);
+    }
   }
 
   function makeMasterMeter() {
@@ -210,23 +396,12 @@
   }
 
   function resetMeterUi() {
-    for (const k of Object.keys(ledHoldUntil)) {
-      delete ledHoldUntil[k];
-    }
     masterHold.L = DB_MIN;
     masterHold.R = DB_MIN;
     paintMasterVu(0, 0);
     if (!caseEl) return;
-    for (const el of caseEl.querySelectorAll('.module')) {
-      el.classList.remove('peaking', 'clipping');
-    }
-    for (const led of caseEl.querySelectorAll('.mod-peak-led, .mod-meter-led')) {
-      led.classList.remove('on', 'hot', 'clip');
-      led.style.opacity = '';
-    }
-    for (const fill of caseEl.querySelectorAll('.mod-peak-fill')) {
-      fill.style.width = '0%';
-      fill.classList.remove('hot', 'clip');
+    for (const led of caseEl.querySelectorAll('.mod-meter-led')) {
+      led.classList.remove('on', 'clip');
     }
     for (const bar of caseEl.querySelectorAll('.mod-meter-bar')) {
       bar.style.width = '0%';
@@ -235,58 +410,6 @@
     for (const hold of caseEl.querySelectorAll('.mod-meter-hold')) {
       hold.style.left = '0%';
       hold.classList.remove('on', 'clip');
-    }
-  }
-
-  function meterTick(now) {
-    if (caseEl) {
-      for (const el of caseEl.querySelectorAll('.module:not(.master)')) {
-        const id = el.dataset.shredId;
-        const until = ledHoldUntil[id] || 0;
-        if (until > 0 && until <= now) {
-          ledHoldUntil[id] = 0;
-          el.classList.remove('peaking');
-          const led = el.querySelector('.mod-peak-led');
-          if (led && !led.classList.contains('clip')) {
-            led.classList.remove('on', 'hot');
-            led.style.opacity = '';
-          }
-        }
-      }
-    }
-    requestAnimationFrame(meterTick);
-  }
-
-  function paintPeaks(peaks) {
-    if (!caseEl) return;
-    const now = performance.now();
-    const mods = caseEl.querySelectorAll('.module:not(.master)');
-    for (const el of mods) {
-      const id = el.dataset.shredId;
-      const lin = Number(peaks[id]) || 0;
-      const db = linToDb(lin);
-      if (db >= LED_ON_DB) {
-        ledHoldUntil[id] = now + LED_HOLD_MS;
-      }
-      const holding = (ledHoldUntil[id] || 0) > now;
-      const clip = db >= LED_CLIP_DB;
-      const on = holding || db >= LED_ON_DB;
-      const hot = db >= LED_HOT_DB;
-      el.classList.toggle('peaking', on && !clip);
-      el.classList.toggle('clipping', clip);
-      const led = el.querySelector('.mod-peak-led');
-      const fill = el.querySelector('.mod-peak-fill');
-      const pct = dbToPct(db);
-      if (fill) {
-        fill.style.width = on || clip ? pct + '%' : '0%';
-        fill.classList.toggle('hot', hot && !clip);
-        fill.classList.toggle('clip', clip);
-      }
-      if (!led) continue;
-      led.classList.toggle('on', on && !hot && !clip);
-      led.classList.toggle('hot', hot && !clip);
-      led.classList.toggle('clip', clip);
-      led.style.opacity = '';
     }
   }
 
@@ -337,6 +460,8 @@
         return current;
       },
       commit,
+      min,
+      max,
     };
   }
 
@@ -380,6 +505,9 @@
 
     const cell = document.createElement('div');
     cell.className = 'cell';
+    cell.dataset.knobName = k.name;
+    cell.dataset.min = String(min);
+    cell.dataset.max = String(max);
     const name = document.createElement('div');
     name.className = 'cell-name';
     name.textContent = shortName(k.name);
@@ -402,6 +530,7 @@
     }
 
     paint(state.commit(state.current, false, paint));
+    cell._knobApply = (v) => state.commit(v, false, paint);
 
     let dragging = false;
     let startY = 0;
@@ -452,6 +581,9 @@
 
     const cell = document.createElement('div');
     cell.className = 'cell cell-slider';
+    cell.dataset.knobName = k.name;
+    cell.dataset.min = String(min);
+    cell.dataset.max = String(max);
     const head = document.createElement('div');
     head.className = 'slider-head';
     const name = document.createElement('span');
@@ -475,6 +607,7 @@
     }
 
     paint(state.commit(state.current, false, paint));
+    cell._knobApply = (v) => state.commit(v, false, paint);
     input.addEventListener('input', () => {
       state.commit(Number(input.value), true, paint);
     });
@@ -502,36 +635,47 @@
 
   function shortName(n) {
     if (n === 'live_bpm') return 'BPM';
-    // saw_cutoff → cutoff; master_amp → amp
     const parts = String(n).split('_');
     return parts.length > 1 ? parts.slice(1).join('_') : n;
   }
 
-  /** Update a dial/slider display without sending OSC (host mirror). */
-  function applyKnobValue(name, value) {
+  function paintKnobCell(cell, value) {
+    if (typeof cell._knobApply === 'function') {
+      cell._knobApply(value);
+      return;
+    }
+    const min = Number(cell.dataset.min) || 0;
+    const max = Number(cell.dataset.max) || 1;
+    const dial = cell.querySelector('.dial');
+    const slider = cell.querySelector('input[type="range"]');
+    const valEl = cell.querySelector('.cell-value');
+    if (dial) {
+      const pointer = dial.querySelector('.dial-pointer');
+      if (pointer) {
+        pointer.style.transform =
+          'rotate(' + normToAngle(norm(value, min, max)) + 'deg)';
+      }
+      if (valEl) valEl.textContent = fmt(value);
+    } else if (slider && valEl) {
+      slider.value = String(value);
+      valEl.textContent = fmt(value);
+    }
+  }
+
+  /** Update dial/slider display; optionally send OSC. */
+  function applyKnobValue(name, value, sendOsc, moduleFile) {
     saved.values[name] = value;
     vscode.setState(saved);
     if (!caseEl) return;
-    for (const cell of caseEl.querySelectorAll('.cell')) {
-      const title = cell.querySelector('.cell-name');
-      if (!title || title.title !== name) continue;
-      const dial = cell.querySelector('.dial');
-      const slider = cell.querySelector('input[type="range"]');
-      const valEl = cell.querySelector('.cell-value');
-      if (dial) {
-        const min = 40;
-        const max = 200;
-        const pointer = dial.querySelector('.dial-pointer');
-        if (pointer) {
-          pointer.style.transform =
-            'rotate(' + normToAngle(norm(value, min, max)) + 'deg)';
-        }
-        if (valEl) valEl.textContent = fmt(value);
-      } else if (slider && valEl) {
-        slider.value = String(value);
-        valEl.textContent = fmt(value);
-      }
+    const scope = moduleFile ? findModuleEl(moduleFile) : caseEl;
+    if (!scope) return;
+    for (const cell of scope.querySelectorAll('.cell[data-knob-name]')) {
+      if (cell.dataset.knobName !== name) continue;
+      paintKnobCell(cell, value);
       break;
+    }
+    if (sendOsc) {
+      vscode.postMessage({ type: 'knob', name, value });
     }
   }
 

@@ -163,6 +163,7 @@ Sequencer auto-adds `@seqGate` tracks (pads only). Run with Sync clocks for a lo
 |------|-----------|--------|
 | `tnt-riff.ck` | `tnt_noteHz`, `tnt_gate` | Power-chord stabs |
 | `acid-bass.ck` | `ab_noteHz`, `ab_accent`, `ab_gate` | 303-style monobass |
+| `volca-bass.ck` | `vb_noteHz`, `vb_accent`, `vb_plockCut`, `vb_slide`, `vb_gate` | Volca Bass–style 3-VCO monobass |
 | `neural-matrix.ck` | `nm_noteHz`, P-locks, `nm_gate` | Dual wavetable/FM bass + fold/crush macros |
 | `pure-sub.ck` | `ps_noteHz`, pitch-env P-lock, `ps_gate` | Layered sub/harm/texture + Sub Regen; P1: Reese/Pressure, corroder, ring mod |
 | `modem.ck` | `md_gate`, `md_digit` | DTMF / FSK texture |
