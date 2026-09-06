@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "name": "demo1",
+  "module": "examples/voices/warm-pad.ck",
+  "values": {
+    "wp_noteHz": 63,
+    "wp_accent": 0.59,
+    "wp_amp": 0.31,
+    "wp_voicing": 0,
+    "wp_saw": 0.33,
+    "wp_detune": 1.65,
+    "wp_breathe": 0.21,
+    "wp_cutoff": 6000,
+    "wp_res": 1.95,
+    "wp_atk": 510,
+    "wp_dec": 1080,
+    "wp_sus": 0.61,
+    "wp_rel": 460,
+    "wp_hold": 2.7,
+    "wp_chorus": 0.2,
+    "wp_space": 0.15
+  }
+}

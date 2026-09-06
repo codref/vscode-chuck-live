@@ -12,6 +12,7 @@ Bundled groove files for the cyberpunk / darkwave stack. Each preset ships as **
 | `bass-cyber-crescendo` | `cy_*` drums + `vb_*` Volca Bass (intro on A, peak on B) |
 | `neural-matrix` | `nm_noteHz` plus accent, cutoff/fold/crush P-locks, slide, ratchet |
 | `pure-sub` | `ps_noteHz`, accent, pitch-env P-lock, cutoff P-lock, slide |
+| `warm-pad` | `wp_noteHz`, `wp_accent` — sparse held chord pad |
 | `doom-vox` | `dv_noteHz`, `dv_accent`, `dv_chop` (sparse doom vocal) |
 | `doom-vox-dual` | `rm_gate`, `cy_gate` — two slot wrappers on different steps |
 
@@ -27,6 +28,8 @@ Bundled groove files for the cyberpunk / darkwave stack. Each preset ships as **
 Neural Matrix (standalone voice, not part of cyberpunk-full): `master.ck` → `voices/neural-matrix.ck` → `fx/cyber-fx.ck` (or `dac-out.ck`), then Load `neural-matrix.json`.
 
 Pure SUB (standalone layered bass): `master.ck` → `voices/pure-sub.ck` → `fx/cyber-fx.ck` (or `dac-out.ck`), then Load `pure-sub.json`. Turn up `ps_pitEnv` / sequence `ps_plockPit` for 808-style drops; `ps_regen` restores clean sub after drive.
+
+Warm pad (chord cluster, not acid): `master.ck` → `voices/warm-pad.ck` → `fx/bus-fx.ck` (or `dac-out.ck`), then Load `warm-pad.json`. Scale **aeolian**, BPM ~96. Try `wp_voicing` 0–4 and long `wp_hold` / `wp_rel`.
 
 Bass cyber crescendo (Volca Bass + cyber drums): `master.ck` → `drums/cyber/*.ck` → `voices/volca-bass.ck` → `fx/cyber-fx.ck`, then Load `bass-cyber-crescendo.json`. Per-track seq presets `intro` / `build` / `peak` live under `.chuck-live/seq-presets/`; knob presets `cyber-intro` / `cyber-build` / `cyber-peak` under `.chuck-live/knob-presets/`.
 

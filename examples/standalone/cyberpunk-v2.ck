@@ -8,15 +8,21 @@
 // @knob min=0 max=0.8 step=0.01 default=0.35
 global float master;
 // @knob min=0 max=1 step=0.01 default=0.55
-global float bass;
+global float bassMix;             // sub level (was `bass` — that was only a mix knob)
 // @knob min=0 max=1 step=0.01 default=0.45
 global float pad;
 // @knob min=0 max=1 step=0.01 default=0.7
 global float arp;
 // @knob min=0 max=0.5 step=0.01 default=0.12
-global float rain;
+global float rainMix;
 // @knob min=0 max=1 step=0.01 default=0.25
 global float glitch;
+
+// ---- bass sequencer (add track ★ bassNote — Sync ON, Run) ----
+// @seq mode=midi min=24 max=48 step=1 default=33 gate=bassGate
+global float bassNote;            // MIDI note → sub Hz
+// @seqGate
+global Event bassGate;
 
 // ---- tone / motion ----
 // @slider min=200 max=5000 step=10 default=900
@@ -24,19 +30,19 @@ global float cutoff;
 // @knob min=0.3 max=4 step=0.05 default=0.7
 global float darkQ;
 // @slider min=0.5 max=2 step=0.01 default=1
-global float root;                // pitch transpose (1 = A minor as written)
+global float root;
 // @slider min=4 max=28 step=1 default=12
 global float arpHz;
 // @knob min=0.05 max=0.95 step=0.01 default=0.35
-global float pulse;               // arp PulseOsc width
+global float pulse;
 // @knob min=0 max=2 step=1 default=0
-global float arpOct;              // extra octaves on arp (0 / 1 / 2)
+global float arpOct;
 // @knob min=0.05 max=0.6 step=0.01 default=0.15
-global float breathe;             // pad LFO rate (Hz-ish)
+global float breathe;
 // @knob min=0 max=8 step=0.1 default=1.5
-global float detune;              // pad detune depth (Hz)
+global float detune;
 // @knob min=0 max=4 step=0.05 default=0.6
-global float subSpread;           // sub twin detune (Hz)
+global float subSpread;
 
 // ---- FX ----
 // @knob min=0 max=0.55 step=0.01 default=0.12
@@ -46,23 +52,22 @@ global float echo;
 // @slider min=80 max=900 step=5 default=450
 global float echoMs;
 // @knob min=0 max=1 step=0.01 default=0.15
-global float drive;               // soft clip into master
+global float drive;
 // @knob min=2000 max=9000 step=50 default=4200
-global float rainTone;            // rain BPF center
+global float rainTone;
 // @knob min=0.5 max=8 step=0.1 default=2.5
 global float rainQ;
 
 // @button
-global Event bang;                // filter open + gated stutter drop
-// @button
-global Event rainBurst;           // short digital-rain swell
+global Event rain;
 
 0.35 => master;
-0.55 => bass;
+0.55 => bassMix;
 0.45 => pad;
 0.7 => arp;
-0.12 => rain;
+0.12 => rainMix;
 0.25 => glitch;
+33.0 => bassNote;                 // A1
 900.0 => cutoff;
 0.7 => darkQ;
 1.0 => root;
@@ -79,7 +84,6 @@ global Event rainBurst;           // short digital-rain swell
 4200.0 => rainTone;
 2.5 => rainQ;
 
-// ---- master bus: mix → soft clip → dark LPF → reverb → out ----
 Gain mix => Gain pre => LPF dark => NRev hall => Gain out => dac;
 1.0 => pre.gain;
 0.12 => hall.mix;
@@ -87,19 +91,23 @@ Gain mix => Gain pre => LPF dark => NRev hall => Gain out => dac;
 0.7 => dark.Q;
 master => out.gain;
 
-// ---- dark sub ----
-SawOsc sub => LPF subLp => Gain subG => mix;
+SawOsc sub => LPF subLp => ADSR subEnv => Gain subG => mix;
 55.0 => sub.freq;
 0.18 => sub.gain;
 120 => subLp.freq;
 1.2 => subLp.Q;
+subEnv.set(3::ms, 90::ms, 0.65, 140::ms);
 0.0 => subG.gain;
 
 SawOsc sub2 => subLp;
 54.4 => sub2.freq;
 0.12 => sub2.gain;
 
-// ---- neon pad ----
+global float live_stepDur;
+0.125 => live_stepDur;
+Event bassGo;
+0.0 => float bassLastGateSec;
+
 SawOsc p1 => Gain padG => Echo trail => mix;
 SawOsc p2 => padG;
 SawOsc p3 => padG;
@@ -114,7 +122,6 @@ SawOsc p3 => padG;
 0.35 => trail.mix;
 0.55 => trail.gain;
 
-// ---- hex arp ----
 PulseOsc arpOsc => ADSR arpEnv => LPF arpLp => Gain arpG => mix;
 0.35 => arpOsc.width;
 0.0 => arpOsc.gain;
@@ -124,16 +131,15 @@ arpEnv.set(2::ms, 40::ms, 0.0, 20::ms);
 
 [110.0, 130.81, 164.81, 220.0, 261.63, 329.63, 440.0, 392.0] @=> float hex[];
 
-// ---- digital rain ----
 Noise hiss => BPF rainBp => Gain rainG => mix;
 0.0 => hiss.gain;
 4200 => rainBp.freq;
 2.5 => rainBp.Q;
 0.0 => rainG.gain;
-0.0 => float rainBoost;           // rainBurst() adds temporary swell
-1.0 => float outGate;              // onBang() ducks this for stutter
 
-// ---- glitch clicks ----
+0.0 => float rainBoost;
+-1.0 => float echoMsPrev;
+
 Noise spit => HPF spitHp => ADSR spitEnv => Gain spitG => mix;
 8000 => spitHp.freq;
 spitEnv.set(0.5::ms, 8::ms, 0.0, 5::ms);
@@ -145,8 +151,9 @@ spork ~ padBreathe();
 spork ~ hexArp();
 spork ~ rainFall();
 spork ~ glitchTicks();
-spork ~ onBang();
-spork ~ onRainBurst();
+spork ~ onRain();
+spork ~ onBassGate();
+spork ~ bassHitWorker();
 
 while (true) {
   20::ms => now;
@@ -154,28 +161,30 @@ while (true) {
 
 fun void follow() {
   while (true) {
-    master * outGate => out.gain;
-    bass * 0.55 => subG.gain;
-    pad * (0.18 + glitch * 0.12) => padG.gain;
-    arp * (0.28 + (1.0 - glitch) * 0.12) => arpG.gain;
-    (rain + rainBoost) => rainG.gain;
-    glitch * 0.45 => spitG.gain;
-
+    master => out.gain;
     cutoff => dark.freq;
-    darkQ => dark.Q;
     cutoff * 1.4 => arpLp.freq;
     Math.max(80.0, cutoff * 0.12) => subLp.freq;
-
-    root * 55.0 => sub.freq;
-    root * 55.0 - subSpread => sub2.freq;
-
+    1.0 + drive * 2.4 => pre.gain;
+    // quiet drone floor + gated envelope on top
+    bassMix * 0.55 * (0.28 + 0.72 * subEnv.value()) => subG.gain;
+    pad * (0.18 + glitch * 0.12) => padG.gain;
+    arp * (0.28 + (1.0 - glitch) * 0.12) => arpG.gain;
+    Math.min(1.0, rainMix + rainBoost) => rainG.gain;
+    glitch * 0.45 => spitG.gain;
+    darkQ => dark.Q;
+    Std.mtof(bassNote) => float f;
+    f => sub.freq;
+    Math.max(20.0, f - subSpread) => sub2.freq;
     pulse => arpOsc.width;
     verb => hall.mix;
     echo => trail.mix;
-    Math.max(80.0, echoMs)::ms => trail.delay;
+    if (echoMs != echoMsPrev) {
+      echoMs => echoMsPrev;
+      Math.max(80.0, echoMs)::ms => trail.delay;
+    }
     rainTone => rainBp.freq;
     rainQ => rainBp.Q;
-    1.0 + drive * 2.4 => pre.gain;
     8::ms => now;
   }
 }
@@ -211,7 +220,7 @@ fun void hexArp() {
 fun void rainFall() {
   while (true) {
     rainTone * Math.random2f(0.75, 1.35) => rainBp.freq;
-    0.015 + (rain + rainBoost) * 0.04 => hiss.gain;
+    0.02 + (rainMix + rainBoost) * 0.14 => hiss.gain;
     Math.random2f(30.0, 90.0)::ms => now;
   }
 }
@@ -229,49 +238,42 @@ fun void glitchTicks() {
   }
 }
 
-fun void onBang() {
+fun void onBassGate() {
   while (true) {
-    bang => now;
-    cutoff => float cutSave;
-    master => float mastSave;
-    bass => float bassSave;
-    drive => float driveSave;
-
-    0.7 => master;
-    1.0 => bass;
-    0.55 => drive;
-    3200.0 => cutoff;
-
-    repeat (8) {
-      0.0 => outGate;
-      28::ms => now;
-      0.9 => outGate;
-      42::ms => now;
-    }
-    1.0 => outGate;
-
-    for (0 => int i; i < 50; i++) {
-      3200.0 - i * 40.0 => cutoff;
-      12::ms => now;
-    }
-
-    cutSave => cutoff;
-    mastSave => master;
-    bassSave => bass;
-    driveSave => drive;
+    bassGate => now;
+    now / second => float t;
+    if (t - bassLastGateSec < 0.003) continue;
+    t => bassLastGateSec;
+    bassGo.broadcast();
   }
 }
 
-fun void onRainBurst() {
+fun void bassHitWorker() {
   while (true) {
-    rainBurst => now;
-    for (0 => int i; i < 40; i++) {
-      (i / 40.0) * 0.35 => rainBoost;
-      12::ms => now;
+    bassGo => now;
+    Std.mtof(bassNote) => float f;
+    f => sub.freq;
+    Math.max(20.0, f - subSpread) => sub2.freq;
+    if (subEnv.value() > 0.015) {
+      // legato — pitch already updated; skip long wait pile-up
+      continue;
     }
-    for (40 => int i; i > 0; i--) {
-      (i / 40.0) * 0.35 => rainBoost;
-      18::ms => now;
+    subEnv.keyOn();
+    Math.max(0.02, live_stepDur * 0.85)::second => now;
+    subEnv.keyOff();
+  }
+}
+
+fun void onRain() {
+  while (true) {
+    rain => now;
+    for (0 => int i; i <= 12; i++) {
+      (i $ float / 12.0) * 0.9 => rainBoost;
+      6::ms => now;
+    }
+    for (12 => int i; i >= 0; i--) {
+      (i $ float / 12.0) * 0.9 => rainBoost;
+      10::ms => now;
     }
     0.0 => rainBoost;
   }

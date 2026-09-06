@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "name": "warm-pad",
+  "scaleName": "aeolian",
+  "masterBpm": 96,
+  "syncClocks": true,
+  "swingEnabled": false,
+  "trackOrder": ["wp_noteHz", "wp_accent"],
+  "patterns": {
+    "wp_noteHz": {
+      "kind": "float",
+      "mode": "midi",
+      "bpm": 96,
+      "swing": 0,
+      "muted": false,
+      "solo": false,
+      "gate": "wp_gate",
+      "activeBank": "A",
+      "editBank": "A",
+      "banks": {
+        "A": {
+          "values": [48, 48, 48, 48, 51, 51, 51, 51, 55, 55, 55, 55, 53, 53, 50, 50],
+          "gates": [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
+          "probs": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+        },
+        "B": {
+          "values": [48, 48, 48, 48, 48, 48, 48, 48, 46, 46, 46, 46, 43, 43, 43, 43],
+          "gates": [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
+          "probs": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+        }
+      }
+    },
+    "wp_accent": {
+      "kind": "float",
+      "mode": "raw",
+      "bpm": 96,
+      "swing": 0,
+      "muted": false,
+      "solo": false,
+      "gate": "wp_gate",
+      "activeBank": "A",
+      "editBank": "A",
+      "banks": {
+        "A": {
+          "values": [0.7, 0.5, 0.5, 0.5, 0.55, 0.5, 0.5, 0.5, 0.65, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
+          "gates": [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
+          "probs": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+        },
+        "B": {
+          "values": [0.75, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.6, 0.5, 0.5, 0.5, 0.55, 0.5, 0.5, 0.5],
+          "gates": [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
+          "probs": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+        }
+      }
+    }
+  }
+}

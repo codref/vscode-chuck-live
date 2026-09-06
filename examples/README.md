@@ -167,6 +167,7 @@ Sequencer auto-adds `@seqGate` tracks (pads only). Run with Sync clocks for a lo
 | `volca-bass.ck` | `vb_noteHz`, `vb_accent`, `vb_plockCut`, `vb_slide`, `vb_gate` | Volca Bass–style 3-VCO monobass |
 | `neural-matrix.ck` | `nm_noteHz`, P-locks, `nm_gate` | Dual wavetable/FM bass + fold/crush macros |
 | `pure-sub.ck` | `ps_noteHz`, pitch-env P-lock, `ps_gate` | Layered sub/harm/texture + Sub Regen; P1: Reese/Pressure, corroder, ring mod |
+| `warm-pad.ck` | `wp_noteHz`, `wp_accent`, `wp_gate` | Soft chord-cluster pad (minor/major/sus2/add9/cluster) — not acid |
 | `modem.ck` | `md_gate`, `md_digit` | DTMF / FSK texture |
 | `doom-vox.ck` | `dv_noteHz`, `dv_accent`, `dv_chop`, `dv_gate` | edge-tts sample: vocoder / pitched / oneshot |
 | `doom-vox-slot.ck` | copy template → unique `xx_gate` | Full oneshot slot (same knobs as doom-vox phrase mode); see [`voices/slots/README.md`](voices/slots/README.md) |
