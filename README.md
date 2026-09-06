@@ -38,7 +38,7 @@ Tip: drag the **ChucK Session** activity icon to the Secondary Side Bar for a ri
 
 Load **`master.ck` first**, then instruments/drums, then **`out/dac-out.ck` or `fx/bus-fx.ck`**. Add **`out/record-out.ck` anytime** to capture WAV (tap-only; safe mid-session). **Add / Reload** warns if a bus module is missing master or a second speaker shred would double-`dac` (Cancel or Add anyway). Details: [examples/README.md](examples/README.md).
 
-Cyberpunk: [examples/cyberpunk/GUIDE.md](examples/cyberpunk/GUIDE.md) (darkwave preset). Standalone: `standalone/demo.ck`, `standalone/cyberpunk.ck`.
+Cyberpunk: [examples/cyberpunk/GUIDE.md](examples/cyberpunk/GUIDE.md) (darkwave preset). Standalone: `standalone/demo.ck`, `standalone/cyberpunk.ck`, `standalone/cyberpunk-v2.ck`.
 
 ## Annotations
 

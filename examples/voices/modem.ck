@@ -84,6 +84,7 @@ md_mix => HPF rumble => BPF telecom => LPF hiss => Gain out => md_meter => rackB
 0.0 => fskG.gain;
 0.0 => noiseG.gain;
 0.0 => dataG.gain;
+0 => int modemGen;
 
 // DTMF row/col frequencies (Hz)
 [697.0, 770.0, 852.0, 941.0] @=> float dtmfRow[];
@@ -104,13 +105,18 @@ fun void _ckLivePeak() {
   }
 }
 
+fun void silenceLayers() {
+  0.0 => dtmfG.gain;
+  0.0 => toneG.gain;
+  0.0 => fskG.gain;
+  0.0 => noiseG.gain;
+  0.0 => dataG.gain;
+  0.0 => md_fskOut;
+}
+
 fun void follow() {
   while (true) {
     md_level => out.gain;
-    md_dtmf * 0.4 => dtmfG.gain;
-    md_tone * 0.25 => toneG.gain;
-    md_fsk * 0.35 => fskG.gain;
-    md_noise * 0.3 => noiseG.gain;
     md_tele => telecom.freq;
     md_teleQ => telecom.Q;
     md_hiss => hiss.freq;
@@ -133,7 +139,8 @@ fun void onConnect() {
   }
 }
 
-fun void playDigit(int d) {
+fun void playDigit(int d, int gen) {
+  if (gen != modemGen) return;
   d % 16 => int idx;
   idx / 4 => int row;
   idx % 4 => int col;
@@ -141,17 +148,23 @@ fun void playDigit(int d) {
   dtmfCol[col] => dtmfB.freq;
   md_dtmf * 0.5 => dtmfG.gain;
   120::ms => now;
+  if (gen != modemGen) return;
   0.0 => dtmfG.gain;
 }
 
 fun void modemBurst() {
+  modemGen + 1 => int gen;
+  gen => modemGen;
+  silenceLayers();
   Std.ftoi(md_digit) => int d;
-  playDigit(d);
-  spork ~ fskBurst(400);
-  spork ~ scrambleHit();
+  playDigit(d, gen);
+  if (gen != modemGen) return;
+  spork ~ fskBurst(400, gen);
+  spork ~ scrambleHit(gen);
 }
 
-fun void fskBurst(int durMs) {
+fun void fskBurst(int durMs, int gen) {
+  if (gen != modemGen) return;
   md_fsk * 0.4 => fskG.gain;
   0 => int bit;
   1070.0 => float mark;
@@ -160,29 +173,41 @@ fun void fskBurst(int durMs) {
   durMs::ms => dur total;
   now + total => time end;
   while (now < end) {
+    if (gen != modemGen) return;
     if (bit) mark => fskOsc.freq; else space => fskOsc.freq;
     bit => md_fskOut;
     1 - bit => bit;
     bitDur => now;
   }
+  if (gen != modemGen) return;
   0.0 => fskG.gain;
   0.0 => md_fskOut;
 }
 
-fun void scrambleHit() {
+fun void scrambleHit(int gen) {
+  if (gen != modemGen) return;
   Math.random2f(md_bpf * 0.7, md_bpf * 1.3) => scrambleBp.freq;
   md_noise * 0.45 => noiseG.gain;
   Math.random2f(40.0, 120.0)::ms => now;
+  if (gen != modemGen) return;
   0.0 => noiseG.gain;
 }
 
 fun void connectSequence() {
+  modemGen + 1 => int gen;
+  gen => modemGen;
+  silenceLayers();
+
   md_tone * 0.35 => toneG.gain;
   800::ms => now;
-  spork ~ fskBurst(1200);
-  400::ms => now;
-  spork ~ scrambleHit();
-  scrambleHit();
-  200::ms => now;
+  if (gen != modemGen) return;
   0.0 => toneG.gain;
+
+  fskBurst(1200, gen);
+  if (gen != modemGen) return;
+  scrambleHit(gen);
+  if (gen != modemGen) return;
+  scrambleHit(gen);
+  if (gen != modemGen) return;
+  silenceLayers();
 }

@@ -124,6 +124,7 @@ Records the **post-master** mix. With `bus-fx.ck`, the file is pre-FX (same tap 
 |------|------------|
 | [`standalone/demo.ck`](standalone/demo.ck) | Minimal sine + knobs |
 | [`standalone/cyberpunk.ck`](standalone/cyberpunk.ck) | Neon pad / arp / rain (self-contained, no bus) |
+| [`standalone/cyberpunk-v2.ck`](standalone/cyberpunk-v2.ck) | Same stack + per-layer / FX knobs for live tweaking |
 
 ## Oscillators (`oscillators/`)
 

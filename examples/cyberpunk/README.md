@@ -23,4 +23,4 @@ Modular darkwave stack. Full performance guide: **[GUIDE.md](GUIDE.md)**.
 - `master_cutoff` ~4500 Hz; `cf_mix` ~0.18
 - Mute per track in Sequencer for live arrangement
 
-Standalone all-in-one demo: [`../standalone/cyberpunk.ck`](../standalone/cyberpunk.ck)
+Standalone all-in-one demos: [`../standalone/cyberpunk.ck`](../standalone/cyberpunk.ck), [`../standalone/cyberpunk-v2.ck`](../standalone/cyberpunk-v2.ck) (more knobs)

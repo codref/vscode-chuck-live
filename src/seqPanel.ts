@@ -171,6 +171,7 @@ export class SeqPanel {
     this.osc.sendFloat(host, oscPort, `/chuck/${LIVE_TRANSPORT.bpm}`, bpm);
     this.osc.sendFloat(host, oscPort, `/chuck/${LIVE_TRANSPORT.step}`, 0);
     this.osc.sendFloat(host, oscPort, `/chuck/${LIVE_TRANSPORT.stepDur}`, stepDur);
+    this.osc.sendInt(host, oscPort, `/chuck/${LIVE_TRANSPORT.cmd}`, 0);
     this.osc.sendFloat(host, oscPort, `/chuck/${LIVE_TRANSPORT.running}`, 0);
     this.osc.sendInt(host, oscPort, `/chuck/${LIVE_TRANSPORT.swing}`, 0);
   }
@@ -273,21 +274,30 @@ export class SeqPanel {
       return;
     }
     const chuckOwnsClock = dump.syncClocks !== false;
+    const wantRun = chuckOwnsClock && !!dump.running && this.lastTransportRunning;
     this.publishTransportBus({
       bpm: dump.masterBpm,
       step: dump.sharedPlayhead,
-      running: chuckOwnsClock ? dump.running : false,
+      running: wantRun,
       swingEnabled: dump.swingEnabled,
     });
-    if (chuckOwnsClock && dump.running) {
-      const { oscPort } = getConfig();
-      this.osc.sendInt(
-        '127.0.0.1',
-        oscPort,
-        `/chuck/${LIVE_TRANSPORT.cmd}`,
-        1
-      );
+    // Re-check after publish — stop may have cleared running mid-republish.
+    this.armTransportRunIfNeeded();
+  }
+
+  /**
+   * Pulse live_cmd=1 only if the host still wants the clock running.
+   * Stop clears cmd first so a stale arm cannot restart after live_running=0.
+   */
+  private armTransportRunIfNeeded(): void {
+    if (!this.lastTransportRunning || !this.lastTransportDump?.running) {
+      return;
     }
+    if (this.lastTransportDump.syncClocks === false) {
+      return;
+    }
+    const { oscPort } = getConfig();
+    this.osc.sendInt('127.0.0.1', oscPort, `/chuck/${LIVE_TRANSPORT.cmd}`, 1);
   }
 
   private async prepareBridgeAndSync(): Promise<void> {
@@ -719,6 +729,10 @@ export class SeqPanel {
       );
     }
     if (msg.running !== undefined) {
+      if (!msg.running) {
+        // Clear start-arm before running=0 so transport applyCmd cannot revive the clock.
+        this.osc.sendInt(host, oscPort, `/chuck/${LIVE_TRANSPORT.cmd}`, 0);
+      }
       this.osc.sendFloat(
         host,
         oscPort,
@@ -879,25 +893,34 @@ export class SeqPanel {
     } catch (err) {
       console.warn('transport reload skipped:', err);
     }
-    // Re-assert bus after OTF (pattern already baked; still push run/cmd).
+    // Stop may have won during OTF — never re-arm from a stale dump.
+    const stillWantRun =
+      running &&
+      this.lastTransportRunning &&
+      !!this.lastTransportDump?.running;
     this.publishTransportBus({
       bpm: dump.masterBpm,
       step: dump.sharedPlayhead ?? 0,
-      running: chuckOwnsClock ? dump.running : false,
+      running: stillWantRun,
       swingEnabled: dump.swingEnabled,
     });
-    if (chuckOwnsClock && running) {
-      const { oscPort } = getConfig();
-      this.osc.sendInt(
-        '127.0.0.1',
-        oscPort,
-        `/chuck/${LIVE_TRANSPORT.cmd}`,
-        1
-      );
+    if (stillWantRun) {
+      this.armTransportRunIfNeeded();
     }
   }
 
   private async applyTransportDump(dump: SeqTransportDump): Promise<void> {
+    // Stop already queued wins over a stale start / bar-wrap OTF flush.
+    const pending = this.pendingTransportDump;
+    if (
+      dump.running &&
+      pending &&
+      pending.syncClocks !== false &&
+      !pending.running
+    ) {
+      return;
+    }
+
     this.lastTransportDump = dump;
     const chuckOwnsClock = dump.syncClocks !== false;
     const running = chuckOwnsClock ? !!dump.running : false;
@@ -915,13 +938,7 @@ export class SeqPanel {
       swingEnabled: dump.swingEnabled,
     });
     if (chuckOwnsClock && dump.running) {
-      const { oscPort } = getConfig();
-      this.osc.sendInt(
-        '127.0.0.1',
-        oscPort,
-        `/chuck/${LIVE_TRANSPORT.cmd}`,
-        1
-      );
+      this.armTransportRunIfNeeded();
     }
 
     // Sync-off: host owns clocks — no ChucK pattern transport needed.
@@ -1151,6 +1168,7 @@ export class SeqPanel {
       <button type="button" id="btnAdd">Add track</button>
       <button type="button" id="btnRunAll">Run all</button>
       <button type="button" id="btnStopAll">Stop all</button>
+      <button type="button" id="btnRemoveAll" title="Clear all tracks and persisted pattern state">Remove all</button>
       <button type="button" id="btnSaveAs" title="Save to .chuck-live/patterns/">Save As…</button>
       <button type="button" id="btnLoad" title="Load from .chuck-live/patterns/">Load…</button>
     </div>

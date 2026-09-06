@@ -295,6 +295,7 @@ export function generateTransportSource(spec: TransportSpec): string {
     '}',
     '',
     'fun void applyCmd() {',
+    '  // Host clears cmd on stop before running=0; only arm-start when cmd is 1.',
     `  if (${LIVE_TRANSPORT.cmd} == 1) {`,
     `    1 => ${LIVE_TRANSPORT.running};`,
     `    0 => ${LIVE_TRANSPORT.cmd};`,

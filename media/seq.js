@@ -65,6 +65,7 @@
   const btnAdd = document.getElementById('btnAdd');
   const btnRunAll = document.getElementById('btnRunAll');
   const btnStopAll = document.getElementById('btnStopAll');
+  const btnRemoveAll = document.getElementById('btnRemoveAll');
   const btnSaveAs = document.getElementById('btnSaveAs');
   const btnLoad = document.getElementById('btnLoad');
   const hintEl = document.getElementById('hint');
@@ -1346,6 +1347,36 @@
     persist();
     dumpTransportSoon();
     render();
+  }
+
+  /** Wipe all tracks + persisted pattern data (stale webview state from prior sessions). */
+  function removeAllTracks() {
+    for (const name of trackOrder.slice()) {
+      stopClock(name);
+      if (patterns[name]) patterns[name].running = false;
+    }
+    clearAllSwingFires();
+    stopMasterTimer();
+    trackOrder = [];
+    for (const k of Object.keys(patterns)) delete patterns[k];
+    if (saved.presetSel) {
+      for (const k of Object.keys(saved.presetSel)) delete saved.presetSel[k];
+    }
+    keyboardTrack = null;
+    recArmed = false;
+    heldPadIndex = -1;
+    stepInputMode = false;
+    patternPendingHint = false;
+    sharedPlayhead = 0;
+    persist();
+    if (useChuckClock()) {
+      publishTransport({ running: false, step: 0 });
+      dumpTransport({ running: false, step: 0 });
+    } else {
+      dumpTransportSoon();
+    }
+    render();
+    refreshKeyboardDrawerState();
   }
 
   function syncPreferredTracks() {
@@ -2999,6 +3030,11 @@
       for (const name of trackOrder) updatePlayhead(name);
       persist();
       refreshKeyboardDrawerState();
+    });
+  }
+  if (btnRemoveAll) {
+    btnRemoveAll.addEventListener('click', () => {
+      removeAllTracks();
     });
   }
   if (btnSaveAs) {
