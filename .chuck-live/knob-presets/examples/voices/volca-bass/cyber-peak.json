@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "name": "cyber-peak",
+  "module": "examples/voices/volca-bass.ck",
+  "values": {
+    "vb_vco1": 0.45,
+    "vb_vco2": 0.4,
+    "vb_vco3": 0.45,
+    "vb_detune": 0.18,
+    "vb_vco2Oct": 1,
+    "vb_vco3Oct": 1,
+    "vb_pulse": 0.55,
+    "vb_cutoff": 2200,
+    "vb_peak": 6.2,
+    "vb_egDecay": 280,
+    "vb_egInt": 0.85,
+    "vb_feedback": 0.4,
+    "vb_amp": 0.52,
+    "vb_accentAmt": 0.85,
+    "vb_slideTime": 160
+  }
+}

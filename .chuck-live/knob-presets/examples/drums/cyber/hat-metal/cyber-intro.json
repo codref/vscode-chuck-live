@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "name": "cyber-intro",
+  "module": "examples/drums/cyber/hat-metal.ck",
+  "values": {
+    "cy_hat_amp": 0.14,
+    "cy_hat_dec": 8,
+    "cy_hat_tone": 8500,
+    "cy_hat_ring": 7,
+    "cy_hat_grit": 0.04
+  }
+}

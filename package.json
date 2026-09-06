@@ -2,7 +2,7 @@
   "name": "chuck-live",
   "displayName": "ChucK Live",
   "description": "Live coding for ChucK: VM control, shred load/unload, and annotated knobs over OSC",
-  "version": "0.3.56",
+  "version": "0.3.57",
   "publisher": "chuck-live",
   "engines": {
     "vscode": "^1.85.0"
@@ -138,6 +138,30 @@
         "command": "chuckLive.generateVoiceSample",
         "title": "ChucK: Generate Voice Sample",
         "icon": "$(mic)"
+      },
+      {
+        "command": "chuckLive.toggleFavorite",
+        "title": "ChucK: Toggle Favorite",
+        "shortTitle": "Favorite",
+        "icon": "$(star)"
+      },
+      {
+        "command": "chuckLive.loadFavorite",
+        "title": "ChucK: Load Favorite",
+        "shortTitle": "Load",
+        "icon": "$(play)"
+      },
+      {
+        "command": "chuckLive.reloadFavorite",
+        "title": "ChucK: Reload Favorite",
+        "shortTitle": "Reload",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "chuckLive.removeFavorite",
+        "title": "ChucK: Remove Favorite",
+        "shortTitle": "Unfavorite",
+        "icon": "$(close)"
       }
     ],
     "keybindings": [
@@ -204,7 +228,7 @@
     "viewsWelcome": [
       {
         "view": "chuckLive.control",
-        "contents": "Start the ChucK VM, then add `.ck` files as shreds from the editor.\n\n[Start VM](command:chuckLive.startVm)\n\n[Init Project Library](command:chuckLive.initProject)\n\n**Knobs** for the active file stay under the **ChucK Live** activity icon."
+        "contents": "Start the ChucK VM, then star `.ck` files from the editor to pin favorites here.\n\n[Start VM](command:chuckLive.startVm)\n\n[Init Project Library](command:chuckLive.initProject)"
       },
       {
         "view": "chuckLive.sessionShreds",
@@ -289,6 +313,21 @@
           "command": "chuckLive.removeShred",
           "when": "view == chuckLive.sessionShreds && viewItem == chuckManagedShred",
           "group": "inline@1"
+        },
+        {
+          "command": "chuckLive.loadFavorite",
+          "when": "view == chuckLive.control && viewItem == chuckFavorite",
+          "group": "inline@1"
+        },
+        {
+          "command": "chuckLive.reloadFavorite",
+          "when": "view == chuckLive.control && viewItem == chuckFavoriteLoaded",
+          "group": "inline@1"
+        },
+        {
+          "command": "chuckLive.removeFavorite",
+          "when": "view == chuckLive.control && viewItem =~ /^chuckFavorite/",
+          "group": "inline@2"
         }
       ],
       "editor/title/run": [
@@ -308,6 +347,11 @@
           "command": "chuckLive.replaceShred",
           "when": "editorLangId == chuck",
           "group": "navigation@2"
+        },
+        {
+          "command": "chuckLive.toggleFavorite",
+          "when": "editorLangId == chuck",
+          "group": "navigation@3"
         }
       ],
       "editor/context": [
@@ -320,6 +364,11 @@
           "command": "chuckLive.replaceShred",
           "when": "editorLangId == chuck",
           "group": "chuckLive@2"
+        },
+        {
+          "command": "chuckLive.toggleFavorite",
+          "when": "editorLangId == chuck",
+          "group": "chuckLive@3"
         }
       ]
     },

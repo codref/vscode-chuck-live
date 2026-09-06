@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "name": "cyber-peak",
+  "module": "examples/drums/cyber/hat-metal.ck",
+  "values": {
+    "cy_hat_amp": 0.28,
+    "cy_hat_dec": 14,
+    "cy_hat_tone": 12000,
+    "cy_hat_ring": 12,
+    "cy_hat_grit": 0.18
+  }
+}

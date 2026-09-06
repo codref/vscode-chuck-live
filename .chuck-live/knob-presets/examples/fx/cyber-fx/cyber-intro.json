@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "name": "cyber-intro",
+  "module": "examples/fx/cyber-fx.ck",
+  "values": {
+    "cf_mix": 0.1,
+    "cf_hp": 240,
+    "cf_formant": 1100,
+    "cf_formQ": 3.2,
+    "cf_dark": 2400,
+    "cf_delay": 280,
+    "cf_feedback": 0.28,
+    "cf_reverb": 0.1,
+    "cf_crush": 0.05
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "name": "demo1",
+  "module": "examples/drums/cyber/bass-digital.ck",
+  "values": {
+    "cy_bass_amp": 0.1,
+    "cy_bass_freq": 51,
+    "cy_bass_dec": 400,
+    "cy_bass_drive": 0.67,
+    "cy_bass_pulse": 0.65,
+    "cy_bass_bits": 3,
+    "cy_bass_rate": 37,
+    "cy_bass_click": 0.68
+  }
+}

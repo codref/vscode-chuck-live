@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "name": "cyber-peak",
+  "module": "examples/drums/cyber/snare-digital.ck",
+  "values": {
+    "cy_snare_amp": 0.48,
+    "cy_snare_dec": 85,
+    "cy_snare_snap": 3200,
+    "cy_snare_tight": 0.4,
+    "cy_snare_hp": 300
+  }
+}

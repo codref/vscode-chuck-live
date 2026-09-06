@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "name": "cyber-peak",
+  "module": "examples/fx/cyber-fx.ck",
+  "values": {
+    "cf_mix": 0.32,
+    "cf_hp": 200,
+    "cf_formant": 1750,
+    "cf_formQ": 5.5,
+    "cf_dark": 4800,
+    "cf_delay": 420,
+    "cf_feedback": 0.55,
+    "cf_reverb": 0.28,
+    "cf_crush": 0.28
+  }
+}

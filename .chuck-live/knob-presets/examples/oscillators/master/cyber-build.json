@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "name": "cyber-build",
+  "module": "examples/oscillators/master.ck",
+  "values": {
+    "master_amp": 0.75,
+    "master_cutoff": 4500,
+    "master_Q": 2.2,
+    "master_hp": 50,
+    "master_drive": 0.18
+  }
+}

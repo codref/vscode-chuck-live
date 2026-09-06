@@ -64,8 +64,6 @@ fun void _ckLivePeak() {
 fun void follow() {
   while (true) {
     cy_kick_amp => g.gain;
-    cy_kick_click => clickG.gain;
-    cy_kick_metal => ringG.gain;
     1.0 + cy_kick_drive * 3.0 => drive.gain;
     cy_kick_tight => tight.freq;
     cy_kick_dec::ms => dur d;

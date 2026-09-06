@@ -30,10 +30,11 @@ import {
   importBundledPatternsCommand,
 } from './projectInit';
 import { AnnotationCompletionProvider } from './annotationComplete';
-import { ControlTreeProvider } from './controlView';
+import { ControlTreeProvider, ControlItem } from './controlView';
 import { ShredCodeLensProvider } from './shredLens';
 import { confirmAddGuardrails } from './shredGuardrails';
 import { OscMessage } from './oscServer';
+import { FavoritesStore } from './favorites';
 
 async function revealSessionViews(): Promise<void> {
   // Cursor/VS Code can leave these promises pending forever — never block Start on them.
@@ -55,11 +56,12 @@ export function activate(context: vscode.ExtensionContext): void {
   const vm = new ChuckVm();
   vm.output.appendLine(`[chuck-live] ${version}`);
   const shredOps = new ShredOps(vm, context.workspaceState);
+  const favorites = new FavoritesStore(context.workspaceState);
   const osc = new OscClient();
   const oscServer = new OscServer();
   const statusBar = new StatusBar(vm, version);
   const tree = new ShredTreeProvider(shredOps);
-  const control = new ControlTreeProvider(vm, version);
+  const control = new ControlTreeProvider(vm, version, favorites, shredOps);
   const shredDnd = new ShredTreeDragAndDropController(shredOps);
 
   const loadBridge = async (
@@ -304,8 +306,9 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.languages.registerCodeLensProvider(
       [{ language: 'chuck' }, { pattern: '**/*.ck' }],
-      new ShredCodeLensProvider(shredOps)
+      new ShredCodeLensProvider(shredOps, favorites)
     ),
+    favorites,
     vm.onStatusChange((on) => {
       if (!on) {
         stopShredGcTimer();
@@ -496,6 +499,47 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
 
+    cmd('chuckLive.toggleFavorite', async () => {
+      const file = await activeChuckFile();
+      if (!file) {
+        return;
+      }
+      const nowFav = favorites.toggle(file);
+      vscode.window.showInformationMessage(
+        nowFav
+          ? `Favorited ${path.basename(file)}`
+          : `Removed ${path.basename(file)} from favorites`
+      );
+    }),
+
+    cmd('chuckLive.loadFavorite', async (item?: ControlItem) => {
+      await loadOrReloadFavorite(item, favorites, shredOps, () => {
+        scheduleShredSideEffects(true);
+        if (rack.isOpen) {
+          void rack.refresh(false);
+        }
+      });
+    }),
+
+    cmd('chuckLive.reloadFavorite', async (item?: ControlItem) => {
+      await loadOrReloadFavorite(item, favorites, shredOps, () => {
+        scheduleShredSideEffects(true);
+        if (rack.isOpen) {
+          void rack.refresh(false);
+        }
+      });
+    }),
+
+    cmd('chuckLive.removeFavorite', async (item?: ControlItem) => {
+      if (!item || item.kind !== 'favorite') {
+        return;
+      }
+      favorites.remove(item.filePath);
+      vscode.window.showInformationMessage(
+        `Removed ${path.basename(item.filePath)} from favorites`
+      );
+    }),
+
     cmd('chuckLive.removeShred', async (item?: ShredInfo) => {
       let id = item?.id;
       if (id === undefined) {
@@ -628,4 +672,49 @@ async function activeChuckFile(): Promise<string | undefined> {
     await doc.save();
   }
   return doc.fileName;
+}
+
+async function loadOrReloadFavorite(
+  item: ControlItem | undefined,
+  favorites: FavoritesStore,
+  shredOps: ShredOps,
+  after: () => void
+): Promise<void> {
+  if (!item || item.kind !== 'favorite') {
+    return;
+  }
+  if (item.missing) {
+    vscode.window.showWarningMessage(
+      `Favorite missing: ${path.basename(item.filePath)}`
+    );
+    return;
+  }
+  if (!favorites.has(item.filePath)) {
+    return;
+  }
+  const file = item.filePath;
+  if (getConfig().saveBeforeAdd) {
+    const doc = vscode.workspace.textDocuments.find(
+      (d) => path.resolve(d.fileName) === path.resolve(file)
+    );
+    if (doc?.isDirty) {
+      await doc.save();
+    }
+  }
+  try {
+    if (!(await confirmAddGuardrails(file, shredOps))) {
+      return;
+    }
+    const existing = shredOps.idForPath(file);
+    if (existing === undefined) {
+      await shredOps.add(file);
+      vscode.window.showInformationMessage(`Added ${path.basename(file)}`);
+    } else {
+      await shredOps.replace(file, existing);
+      vscode.window.showInformationMessage(`Reloaded shred #${existing}`);
+    }
+    after();
+  } catch (err) {
+    vscode.window.showErrorMessage(String(err));
+  }
 }

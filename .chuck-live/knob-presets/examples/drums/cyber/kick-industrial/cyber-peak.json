@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "name": "cyber-peak",
+  "module": "examples/drums/cyber/kick-industrial.ck",
+  "values": {
+    "cy_kick_amp": 0.78,
+    "cy_kick_freq": 68,
+    "cy_kick_dec": 95,
+    "cy_kick_click": 0.75,
+    "cy_kick_metal": 0.55,
+    "cy_kick_drive": 0.55,
+    "cy_kick_tight": 140
+  }
+}
