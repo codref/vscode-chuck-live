@@ -1,0 +1,73 @@
+# Build the .vsix and publish it to a GitHub Release.
+#
+# Tag a version (preferred):
+#   git tag v0.3.59 && git push origin v0.3.59
+# The tag (without leading v) becomes package.json version for the build.
+#
+# Or: Actions → Release → Run workflow (builds + uploads artifact only).
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Sync version from tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          if [[ ! "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "Tag must look like v1.2.3 (got: $GITHUB_REF_NAME)" >&2
+            exit 1
+          fi
+          export TAG
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = process.env.TAG;
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+            console.log('package.json version →', pkg.version);
+          "
+
+      - name: Package VSIX
+        run: npm run package:release
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chuck-live-vsix
+          path: '*.vsix'
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          VSIX="chuck-live-${VERSION}.vsix"
+          test -f "$VSIX"
+          gh release create "$GITHUB_REF_NAME" "$VSIX" \
+            --title "ChucK Live ${VERSION}" \
+            --generate-notes \
+            --verify-tag

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "name": "demo1",
+  "module": "examples/drums/cyber/snare-digital.ck",
+  "values": {
+    "cy_snare_amp": 0.16,
+    "cy_snare_dec": 180,
+    "cy_snare_snap": 2120,
+    "cy_snare_tight": 0.66,
+    "cy_snare_hp": 625
+  }
+}

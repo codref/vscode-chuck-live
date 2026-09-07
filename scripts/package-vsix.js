@@ -9,8 +9,15 @@ const { execFileSync } = require('child_process');
 const root = path.join(__dirname, '..');
 const pkgPath = path.join(root, 'package.json');
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-pkg.version = bumpPatch(pkg.version);
-fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+// Local installs bump patch; CI/release use --no-bump (or CHUCK_LIVE_NO_BUMP=1).
+const noBump =
+  process.argv.includes('--no-bump') ||
+  process.env.CHUCK_LIVE_NO_BUMP === '1' ||
+  process.env.CHUCK_LIVE_NO_BUMP === 'true';
+if (!noBump) {
+  pkg.version = bumpPatch(pkg.version);
+  fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+}
 console.log('Version', pkg.version);
 const outName = `${pkg.name}-${pkg.version}.vsix`;
 const staging = path.join(root, '.vsix-staging');

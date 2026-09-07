@@ -5,24 +5,41 @@ VS Code / Cursor extension for **live coding** with [ChucK](https://chuck.stanfo
 ## Requirements
 
 - [ChucK](https://chuck.stanford.edu/) on your `PATH` (`chuck` CLI). This machine has 1.5.x+.
-- Node.js 18+ to build.
+- Node.js 18+ only if you build from source.
 
-## Install (this workspace)
+## Install (VS Code / Cursor)
+
+1. Open the latest [GitHub Release](https://github.com/codref/vscode-chuck-live/releases) and download `chuck-live-*.vsix`.
+2. In **VS Code** or **Cursor**:
+   - Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) → **Extensions: Install from VSIX…**
+   - Or: Extensions view (`Ctrl+Shift+X`) → `…` menu (top right) → **Install from VSIX…**
+3. Pick the downloaded `.vsix`, then **Developer: Reload Window** if the extension does not activate yet.
+
+CLI alternative (with the editor CLI on `PATH`):
 
 ```bash
-cd /home/operatore/git-codref/r-n-d/vscode-chuck-live
-# Compile, pack, and install into Cursor (or VS Code):
-npm run install-local
-# Without npm:
-node scripts/install-local.js
+# Cursor
+cursor --install-extension chuck-live-0.3.59.vsix --force
+# VS Code
+code --install-extension chuck-live-0.3.59.vsix --force
 ```
 
-From the editor: **Terminal → Run Task… → install-local**, then **Developer: Reload Window**. Each package/install bumps the **build (patch)** version (`0.3.0` → `0.3.1`); the status bar and ChucK output show the running build.
+After install you should see **ChucK Live** and **ChucK Session** in the Activity Bar.
+
+### Build from this workspace
+
+```bash
+npm run install-local
+# or: node scripts/install-local.js
+```
+
+From the editor: **Terminal → Run Task… → install-local**, then **Developer: Reload Window**. Each local package/install bumps the **build (patch)** version (`0.3.0` → `0.3.1`); the status bar and ChucK output show the running build.
 
 Override the CLI with `CHUCK_LIVE_EDITOR=code` (or `cursor`) if both are on `PATH`.
 
 **Dev host:** open this folder in Cursor/VS Code, press F5 (“Run Extension”).
 
+**Release a build:** tag and push (`git tag v0.3.59 && git push origin v0.3.59`) — CI packs the `.vsix` and attaches it to the GitHub Release.
 ## Quick start
 
 1. **ChucK: Init Project Library** (optional) — copies modules into `chuck/` and AI agent docs for Cursor/Copilot.
