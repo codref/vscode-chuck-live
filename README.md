@@ -2,6 +2,12 @@
 
 VS Code / Cursor extension for **live coding** with [ChucK](https://chuck.stanford.edu/): persistent VM, shred add/replace/remove, and a knobs panel driven by source annotations over OSC.
 
+## License
+
+ChucK Live is licensed under the [MIT License](LICENSE).
+
+[ChucK](https://chuck.stanford.edu/) itself is Copyright (c) 2003 Ge Wang and Perry R. Cook (MIT or GPL-2.0-or-later). This extension does not ship the ChucK binary.
+
 ## Requirements
 
 - [ChucK](https://chuck.stanford.edu/) on your `PATH` (`chuck` CLI). This machine has 1.5.x+.

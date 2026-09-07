@@ -29,6 +29,7 @@ fs.mkdirSync(extDir, { recursive: true });
 const include = [
   'package.json',
   'README.md',
+  'LICENSE',
   'language-configuration.json',
   'out',
   'media',

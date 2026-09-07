@@ -1,10 +1,12 @@
-# Build the .vsix and publish it to a GitHub Release.
+# Build the .vsix and attach it to a GitHub Release.
 #
-# Tag a version (preferred):
-#   git tag v0.3.59 && git push origin v0.3.59
-# The tag (without leading v) becomes package.json version for the build.
+# Triggers:
+#   - Push a version tag:  git tag v0.3.60 && git push origin v0.3.60
+#   - Publish a Release in the GitHub UI (tag v*)
+#   - Actions → Release → Run workflow (optional: pass an existing tag to attach)
 #
-# Or: Actions → Release → Run workflow (builds + uploads artifact only).
+# Tip: prefer tagging a commit that already includes this workflow (usually main).
+# UI / manual runs build from the default branch and stamp package.json from the tag.
 
 name: Release
 
@@ -12,7 +14,14 @@ on:
   push:
     tags:
       - 'v*'
+  release:
+    types: [published]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to attach the VSIX to (e.g. v0.3.59). Leave empty for artifact only.'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -21,8 +30,27 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve tag
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag='$TAG' version='$VERSION'"
+
+      # Tag pushes build that commit. UI release / manual runs use default branch so
+      # packaging scripts exist even if the release tag points at an older commit.
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || github.event.repository.default_branch }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -33,18 +61,18 @@ jobs:
         run: npm install
 
       - name: Sync version from tag
-        if: startsWith(github.ref, 'refs/tags/')
+        if: steps.meta.outputs.version != ''
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          if [[ ! "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-            echo "Tag must look like v1.2.3 (got: $GITHUB_REF_NAME)" >&2
+          VERSION="${{ steps.meta.outputs.version }}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "Tag/version must look like v1.2.3 (got: ${{ steps.meta.outputs.tag }})" >&2
             exit 1
           fi
-          export TAG
+          export VERSION
           node -e "
             const fs = require('fs');
             const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            pkg.version = process.env.TAG;
+            pkg.version = process.env.VERSION;
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
             console.log('package.json version →', pkg.version);
           "
@@ -59,15 +87,23 @@ jobs:
           path: '*.vsix'
           if-no-files-found: error
 
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Attach VSIX to GitHub Release
+        if: steps.meta.outputs.tag != ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION=$(node -p "require('./package.json').version")
+          TAG="${{ steps.meta.outputs.tag }}"
+          VERSION="${{ steps.meta.outputs.version }}"
           VSIX="chuck-live-${VERSION}.vsix"
           test -f "$VSIX"
-          gh release create "$GITHUB_REF_NAME" "$VSIX" \
-            --title "ChucK Live ${VERSION}" \
-            --generate-notes \
-            --verify-tag
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$VSIX" --clobber
+            echo "Uploaded $VSIX to existing release $TAG"
+          else
+            gh release create "$TAG" "$VSIX" \
+              --title "ChucK Live ${VERSION}" \
+              --generate-notes \
+              --verify-tag
+            echo "Created release $TAG with $VSIX"
+          fi

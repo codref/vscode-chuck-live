@@ -2,8 +2,9 @@
   "name": "chuck-live",
   "displayName": "ChucK Live",
   "description": "Live coding for ChucK: VM control, shred load/unload, and annotated knobs over OSC",
-  "version": "0.3.59",
+  "version": "0.3.60",
   "publisher": "chuck-live",
+  "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
   },
